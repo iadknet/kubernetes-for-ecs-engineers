@@ -56,21 +56,26 @@ func Load(fsys fs.FS, dir string) (*Library, error) {
 	if err != nil {
 		return nil, fmt.Errorf("globbing decks: %w", err)
 	}
+
 	if len(entries) == 0 {
 		return nil, fmt.Errorf("no *.yaml decks found in %q", dir)
 	}
+
 	sort.Strings(entries)
 
 	lib := &Library{byID: make(map[string]Card)}
+
 	for _, name := range entries {
 		data, err := fs.ReadFile(fsys, name)
 		if err != nil {
 			return nil, fmt.Errorf("reading %s: %w", name, err)
 		}
+
 		d, err := parse(data, path.Base(name))
 		if err != nil {
 			return nil, err
 		}
+
 		lib.Decks = append(lib.Decks, d)
 		lib.Cards = append(lib.Cards, d.Cards...)
 	}
@@ -79,8 +84,10 @@ func Load(fsys fs.FS, dir string) (*Library, error) {
 		if _, dup := lib.byID[c.ID]; dup {
 			return nil, fmt.Errorf("duplicate card id %q: ids must be unique across decks because review history is keyed on them", c.ID)
 		}
+
 		lib.byID[c.ID] = c
 	}
+
 	return lib, nil
 }
 
@@ -94,27 +101,33 @@ func parse(data []byte, filename string) (Deck, error) {
 	if err := yaml.Unmarshal(data, &d); err != nil {
 		return Deck{}, fmt.Errorf("parsing %s: %w", filename, err)
 	}
+
 	if d.Name == "" {
 		return Deck{}, fmt.Errorf("%s: missing top-level 'deck:' title", filename)
 	}
+
 	if len(d.Cards) == 0 {
 		return Deck{}, fmt.Errorf("%s: deck has no cards", filename)
 	}
 
 	stem := strings.TrimSuffix(filename, ".yaml")
+
 	for i := range d.Cards {
 		c := &d.Cards[i]
 		if c.ID == "" {
 			return Deck{}, fmt.Errorf("%s: card #%d has no id", filename, i+1)
 		}
+
 		if strings.TrimSpace(c.Q) == "" || strings.TrimSpace(c.A) == "" {
 			return Deck{}, fmt.Errorf("%s: card %q needs both 'q' and 'a'", filename, c.ID)
 		}
+
 		c.Deck = d.Name
 		c.Module = d.Module
 		c.File = stem
 		c.Tags = append(append([]string{}, c.Tags...), d.Tags...)
 	}
+
 	return d, nil
 }
 
@@ -129,21 +142,26 @@ func (f Filter) Match(c Card) bool {
 	if f.Module != "" && !strings.EqualFold(f.Module, c.Module) {
 		return false
 	}
+
 	if f.Deck != "" && !strings.Contains(strings.ToLower(c.File), strings.ToLower(f.Deck)) {
 		return false
 	}
+
 	if f.Tag != "" {
 		var found bool
+
 		for _, t := range c.Tags {
 			if strings.EqualFold(t, f.Tag) {
 				found = true
 				break
 			}
 		}
+
 		if !found {
 			return false
 		}
 	}
+
 	return true
 }
 
@@ -155,12 +173,14 @@ func (l *Library) Select(f Filter) []Card {
 			out = append(out, c)
 		}
 	}
+
 	return out
 }
 
 // Modules returns the distinct module names, in first-seen order.
 func (l *Library) Modules() []string {
 	var out []string
+
 	seen := map[string]bool{}
 	for _, d := range l.Decks {
 		if d.Module != "" && !seen[d.Module] {
@@ -168,21 +188,26 @@ func (l *Library) Modules() []string {
 			out = append(out, d.Module)
 		}
 	}
+
 	return out
 }
 
 // Tags returns every distinct tag, sorted.
 func (l *Library) Tags() []string {
 	seen := map[string]bool{}
+
 	for _, c := range l.Cards {
 		for _, t := range c.Tags {
 			seen[t] = true
 		}
 	}
+
 	out := make([]string, 0, len(seen))
 	for t := range seen {
 		out = append(out, t)
 	}
+
 	sort.Strings(out)
+
 	return out
 }

@@ -56,9 +56,11 @@ func run(log *slog.Logger) error {
 	} else {
 		lib, err = deck.Load(flashcards.Decks, "decks")
 	}
+
 	if err != nil {
 		return fmt.Errorf("loading decks: %w", err)
 	}
+
 	log.Info("decks loaded", "decks", len(lib.Decks), "cards", len(lib.Cards))
 
 	// 0o750, not 0o755: only the running user (65532 in the image) and its group
@@ -66,6 +68,7 @@ func run(log *slog.Logger) error {
 	if err := os.MkdirAll(dataDir, 0o750); err != nil {
 		return fmt.Errorf("creating data dir: %w", err)
 	}
+
 	store, err := review.Open(filepath.Join(dataDir, "review.json"), newPerDay)
 	if err != nil {
 		return fmt.Errorf("opening review store: %w", err)
@@ -91,8 +94,10 @@ func run(log *slog.Logger) error {
 	defer stop()
 
 	errCh := make(chan error, 1)
+
 	go func() {
 		log.Info("listening", "addr", "http://localhost:"+port, "data", dataDir)
+
 		if err := httpSrv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
 			errCh <- err
 		}
@@ -107,10 +112,13 @@ func run(log *slog.Logger) error {
 
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
+
 	if err := httpSrv.Shutdown(shutdownCtx); err != nil {
 		return fmt.Errorf("graceful shutdown failed: %w", err)
 	}
+
 	log.Info("stopped cleanly")
+
 	return nil
 }
 
@@ -123,6 +131,7 @@ func logging(log *slog.Logger, next http.Handler) http.Handler {
 		if r.URL.Path == "/healthz" || r.URL.Path == "/readyz" {
 			return
 		}
+
 		log.Info("request",
 			"method", r.Method, "path", r.URL.Path,
 			"status", rec.status, "dur", time.Since(start).Round(time.Millisecond))
@@ -143,6 +152,7 @@ func env(key, fallback string) string {
 	if v := os.Getenv(key); v != "" {
 		return v
 	}
+
 	return fallback
 }
 
@@ -152,5 +162,6 @@ func envInt(key string, fallback int) int {
 			return n
 		}
 	}
+
 	return fallback
 }

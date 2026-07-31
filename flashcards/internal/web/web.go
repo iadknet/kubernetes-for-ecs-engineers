@@ -40,6 +40,7 @@ func New(lib *deck.Library, store *review.Store) (*Server, error) {
 	if err != nil {
 		return nil, fmt.Errorf("parsing templates: %w", err)
 	}
+
 	return &Server{
 		lib:   lib,
 		store: store,
@@ -60,6 +61,7 @@ func (s *Server) Routes() *http.ServeMux {
 	mux.HandleFunc("GET /healthz", s.handleHealthz)
 	mux.HandleFunc("GET /readyz", s.handleReadyz)
 	mux.Handle("GET /static/", http.FileServerFS(assets))
+
 	return mux
 }
 
@@ -72,6 +74,7 @@ type filter struct {
 
 func filterFrom(r *http.Request) filter {
 	q := r.URL.Query()
+
 	return filter{
 		Filter: deck.Filter{
 			Module: q.Get("module"),
@@ -88,15 +91,19 @@ func (f filter) Query() template.URL {
 	if f.Module != "" {
 		v.Set("module", f.Module)
 	}
+
 	if f.Deck != "" {
 		v.Set("deck", f.Deck)
 	}
+
 	if f.Tag != "" {
 		v.Set("tag", f.Tag)
 	}
+
 	if f.Cram {
 		v.Set("cram", "1")
 	}
+
 	if len(v) == 0 {
 		return ""
 	}
@@ -110,18 +117,23 @@ func (f filter) Label() string {
 	if f.Module != "" {
 		parts = append(parts, f.Module)
 	}
+
 	if f.Deck != "" {
 		parts = append(parts, f.Deck)
 	}
+
 	if f.Tag != "" {
 		parts = append(parts, "#"+f.Tag)
 	}
+
 	if len(parts) == 0 {
 		parts = append(parts, "all decks")
 	}
+
 	if f.Cram {
 		parts = append(parts, "(cram)")
 	}
+
 	return strings.Join(parts, " · ")
 }
 
@@ -167,6 +179,7 @@ func (s *Server) markdown(src string) template.HTML {
 	if strings.TrimSpace(src) == "" {
 		return ""
 	}
+
 	var buf bytes.Buffer
 	if err := s.md.Convert([]byte(src), &buf); err != nil {
 		// Fall back to escaped plain text rather than failing the request.
@@ -188,19 +201,24 @@ func (s *Server) next(f filter, exclude string) (deck.Card, bool) {
 	if len(cards) == 0 {
 		return deck.Card{}, false
 	}
+
 	if f.Cram {
 		return s.store.Cram(cards, exclude)
 	}
+
 	return s.store.Next(cards, s.now())
 }
 
 func (s *Server) handleIndex(w http.ResponseWriter, _ *http.Request) {
 	now := s.now()
+
 	type deckRow struct {
 		Name, Module, File string
 		Stats              review.Stats
 	}
+
 	var rows []deckRow
+
 	for _, d := range s.lib.Decks {
 		f := deck.Filter{Deck: d.Cards[0].File}
 		rows = append(rows, deckRow{
@@ -222,6 +240,7 @@ func (s *Server) handleIndex(w http.ResponseWriter, _ *http.Request) {
 func (s *Server) handleDrill(w http.ResponseWriter, r *http.Request) {
 	f := filterFrom(r)
 	card, ok := s.next(f, "")
+
 	data := map[string]any{
 		"Filter":  f,
 		"Stats":   s.store.Stats(s.lib.Select(f.Filter), s.now()),
@@ -230,16 +249,19 @@ func (s *Server) handleDrill(w http.ResponseWriter, r *http.Request) {
 	if ok {
 		data["Card"] = s.view(card, f)
 	}
+
 	s.render(w, "drill.html", data)
 }
 
 func (s *Server) handleReveal(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
+
 	card, ok := s.lib.Get(id)
 	if !ok {
 		http.Error(w, "unknown card: "+id, http.StatusNotFound)
 		return
 	}
+
 	s.renderFragment(w, "card-back", s.view(card, filterFrom(r)))
 }
 
@@ -263,20 +285,24 @@ func (s *Server) handleGrade(w http.ResponseWriter, r *http.Request) {
 	}
 
 	f := filterFrom(r)
+
 	card, ok := s.next(f, id)
 	if !ok {
 		s.renderFragment(w, "card-done", map[string]any{
 			"Filter": f,
 			"Stats":  s.store.Stats(s.lib.Select(f.Filter), s.now()),
 		})
+
 		return
 	}
+
 	s.renderFragment(w, "card-front", s.view(card, f))
 }
 
 func (s *Server) handleBrowse(w http.ResponseWriter, r *http.Request) {
 	f := filterFrom(r)
 	cards := s.lib.Select(f.Filter)
+
 	views := make([]cardView, 0, len(cards))
 	for _, c := range cards {
 		views = append(views, cardView{
@@ -286,6 +312,7 @@ func (s *Server) handleBrowse(w http.ResponseWriter, r *http.Request) {
 			ECS:  s.markdown(c.ECS),
 		})
 	}
+
 	s.render(w, "browse.html", map[string]any{"Cards": views, "Filter": f})
 }
 
@@ -302,14 +329,17 @@ func (s *Server) handleHealthz(w http.ResponseWriter, _ *http.Request) {
 // record reviews shouldn't be in the Service's endpoints.
 func (s *Server) handleReadyz(w http.ResponseWriter, _ *http.Request) {
 	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+
 	if len(s.lib.Cards) == 0 {
 		http.Error(w, "no cards loaded", http.StatusServiceUnavailable)
 		return
 	}
+
 	if err := s.store.Writable(); err != nil {
 		http.Error(w, "review store not writable: "+err.Error(), http.StatusServiceUnavailable)
 		return
 	}
+
 	_, _ = fmt.Fprintf(w, "ok: %d cards, %d decks\n", len(s.lib.Cards), len(s.lib.Decks))
 }
 
@@ -319,6 +349,7 @@ func (s *Server) render(w http.ResponseWriter, name string, data any) {
 		http.Error(w, "template error: "+err.Error(), http.StatusInternalServerError)
 		return
 	}
+
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	_, _ = buf.WriteTo(w) // headers are already sent; a write failure is the client's disconnect
 }
@@ -332,6 +363,7 @@ func humanUntil(t time.Time) string {
 	if t.IsZero() {
 		return "—"
 	}
+
 	d := time.Until(t)
 	switch {
 	case d < 0:

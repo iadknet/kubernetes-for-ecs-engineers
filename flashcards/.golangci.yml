@@ -26,6 +26,7 @@ linters:
     # style
     - gocritic         # opinionated style: unnecessary conversions, range copies, redundant code
     - revive           # naming conventions, exported types, stuttered package names
+    - wsl_v5           # whitespace and blank line rules for readability
     - whitespace       # trailing whitespace, unnecessary blank lines
     - godot            # exported-symbol comments must end with a period
     - misspell         # common English misspellings in identifiers and comments
@@ -59,6 +60,7 @@ linters:
     - testifylint      # testify best practices
     - thelper          # test helpers missing t.Helper()
     - usetesting       # use t.Setenv/t.TempDir instead of os equivalents in tests
+    - paralleltest     # tests and subtests missing t.Parallel()
     # modernization & meta
     - modernize        # old patterns replaceable with newer Go features
     - exptostd         # replace golang.org/x/exp/ functions with stdlib equivalents
@@ -68,14 +70,6 @@ linters:
     - nolintlint       # enforces proper //nolint directive usage
 
   disable:
-    # --- Disabled for this repo (differs from the upstream samber default) ---
-    - wsl_v5           # blank-line placement. Flagged 141 of 192 issues on the initial run,
-                       # all cosmetic. Rewriting every function body to satisfy it would bury
-                       # real findings in churn. Re-enable only alongside a dedicated reformat.
-    - paralleltest     # missing t.Parallel(). 32 real hits — worth doing, but adding t.Parallel()
-                       # to every test needs a check for shared state (t.Setenv, working dir)
-                       # first. Tracked as follow-up work, not a blocker for `make check`.
-    # --- Upstream defaults, kept disabled ---
     - lll              # line length — handled by gofmt/gofumpt
     - prealloc         # high false-positive rate; enable only after performance profiling
     - wrapcheck        # forces wrapping all external errors — too noisy as a default

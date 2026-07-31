@@ -79,15 +79,19 @@ func Open(path string, newPerDay int) (*Store, error) {
 	if err := json.Unmarshal(data, &s.st); err != nil {
 		return nil, fmt.Errorf("parsing review state at %s: %w", path, err)
 	}
+
 	if s.st.Cards == nil {
 		s.st.Cards = map[string]fsrs.Card{}
 	}
+
 	if s.st.Reviews == nil {
 		s.st.Reviews = map[string]int{}
 	}
+
 	if s.st.NewSeen == nil {
 		s.st.NewSeen = map[string]int{}
 	}
+
 	return s, nil
 }
 
@@ -115,6 +119,7 @@ func (s *Store) Grade(id string, g Grade, now time.Time) (time.Time, error) {
 	if err := s.save(); err != nil {
 		return time.Time{}, err
 	}
+
 	return next.Due, nil
 }
 
@@ -125,7 +130,9 @@ func (s *Store) save() error {
 	if err != nil {
 		return fmt.Errorf("encoding review state: %w", err)
 	}
+
 	dir := filepath.Dir(s.path)
+
 	tmp, err := os.CreateTemp(dir, ".review-*.json")
 	if err != nil {
 		return fmt.Errorf("creating temp state file in %s: %w", dir, err)
@@ -139,12 +146,15 @@ func (s *Store) save() error {
 		_ = tmp.Close() // already failing; the write error is the one worth reporting
 		return fmt.Errorf("writing review state: %w", err)
 	}
+
 	if err := tmp.Close(); err != nil {
 		return fmt.Errorf("closing review state: %w", err)
 	}
+
 	if err := os.Rename(tmp.Name(), s.path); err != nil {
 		return fmt.Errorf("replacing review state: %w", err)
 	}
+
 	return nil
 }
 
@@ -153,6 +163,7 @@ func (s *Store) save() error {
 func (s *Store) Writable() error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+
 	return s.save()
 }
 
@@ -163,8 +174,11 @@ func (s *Store) Next(cards []deck.Card, now time.Time) (deck.Card, bool) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	var due []deck.Card
-	var fresh []deck.Card
+	var (
+		due   []deck.Card
+		fresh []deck.Card
+	)
+
 	for _, c := range cards {
 		st, seen := s.st.Cards[c.ID]
 		switch {
@@ -179,11 +193,14 @@ func (s *Store) Next(cards []deck.Card, now time.Time) (deck.Card, bool) {
 		sort.Slice(due, func(i, j int) bool {
 			return s.st.Cards[due[i].ID].Due.Before(s.st.Cards[due[j].ID].Due)
 		})
+
 		return due[0], true
 	}
+
 	if len(fresh) > 0 && s.st.NewSeen[day(now)] < s.newPerDay {
 		return fresh[0], true
 	}
+
 	return deck.Card{}, false
 }
 
@@ -194,11 +211,14 @@ func (s *Store) Cram(cards []deck.Card, exclude string) (deck.Card, bool) {
 	defer s.mu.Unlock()
 
 	best := -1
+
 	var bestSeen time.Time
+
 	for i, c := range cards {
 		if c.ID == exclude && len(cards) > 1 {
 			continue
 		}
+
 		st, seen := s.st.Cards[c.ID]
 		switch {
 		case !seen:
@@ -207,9 +227,11 @@ func (s *Store) Cram(cards []deck.Card, exclude string) (deck.Card, bool) {
 			best, bestSeen = i, st.LastReview
 		}
 	}
+
 	if best == -1 {
 		return deck.Card{}, false
 	}
+
 	return cards[best], true
 }
 
@@ -236,17 +258,20 @@ func (s *Store) Stats(cards []deck.Card, now time.Time) Stats {
 			out.New++
 			continue
 		}
+
 		if !st.Due.After(now) {
 			out.Due++
 		} else if out.NextDue.IsZero() || st.Due.Before(out.NextDue) {
 			out.NextDue = st.Due
 		}
+
 		if st.State == fsrs.Review {
 			out.Known++
 		} else {
 			out.Learning++
 		}
 	}
+
 	return out
 }
 
@@ -260,10 +285,12 @@ func (s *Store) Streak(now time.Time) int {
 	if s.st.Reviews[day(d)] == 0 {
 		d = d.AddDate(0, 0, -1) // today not studied yet; don't break the streak
 	}
+
 	n := 0
 	for s.st.Reviews[day(d)] > 0 {
 		n++
 		d = d.AddDate(0, 0, -1)
 	}
+
 	return n
 }

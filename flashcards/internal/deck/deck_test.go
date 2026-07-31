@@ -12,6 +12,8 @@ import (
 // The embedded decks are the actual product here, so validating them is a real
 // test rather than a formality: a typo'd id silently resets review history.
 func TestEmbeddedDecksAreValid(t *testing.T) {
+	t.Parallel()
+
 	lib, err := deck.Load(flashcards.Decks, "decks")
 	if err != nil {
 		t.Fatalf("embedded decks failed to load: %v", err)
@@ -20,6 +22,7 @@ func TestEmbeddedDecksAreValid(t *testing.T) {
 	if len(lib.Cards) < 150 {
 		t.Errorf("expected at least 150 cards, got %d", len(lib.Cards))
 	}
+
 	if len(lib.Decks) < 10 {
 		t.Errorf("expected at least 10 decks, got %d", len(lib.Decks))
 	}
@@ -28,6 +31,7 @@ func TestEmbeddedDecksAreValid(t *testing.T) {
 		if c.Deck == "" || c.File == "" {
 			t.Errorf("card %q missing derived deck metadata", c.ID)
 		}
+
 		if len(c.Tags) == 0 {
 			t.Errorf("card %q has no tags", c.ID)
 		}
@@ -36,10 +40,13 @@ func TestEmbeddedDecksAreValid(t *testing.T) {
 
 // Every module in the curriculum should be drillable by name.
 func TestEmbeddedDecksCoverCurriculumModules(t *testing.T) {
+	t.Parallel()
+
 	lib, err := deck.Load(flashcards.Decks, "decks")
 	if err != nil {
 		t.Fatal(err)
 	}
+
 	for _, m := range []string{"M0", "M1", "M2", "M3", "M4", "M5", "M6", "M7", "CAP"} {
 		if got := lib.Select(deck.Filter{Module: m}); len(got) == 0 {
 			t.Errorf("no cards for module %s", m)
@@ -53,6 +60,8 @@ func loadOne(t *testing.T, body string) (*deck.Library, error) {
 }
 
 func TestParseRejectsMalformedDecks(t *testing.T) {
+	t.Parallel()
+
 	tests := []struct {
 		name, yaml, wantErr string
 	}{
@@ -85,10 +94,13 @@ func TestParseRejectsMalformedDecks(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
 			_, err := loadOne(t, tt.yaml)
 			if err == nil {
 				t.Fatal("expected an error, got nil")
 			}
+
 			if !strings.Contains(err.Error(), tt.wantErr) {
 				t.Errorf("error %q does not mention %q", err, tt.wantErr)
 			}
@@ -97,10 +109,13 @@ func TestParseRejectsMalformedDecks(t *testing.T) {
 }
 
 func TestDuplicateIDsAcrossDecksAreRejected(t *testing.T) {
+	t.Parallel()
+
 	fsys := fstest.MapFS{
 		"decks/a.yaml": {Data: []byte("deck: A\ncards:\n  - id: dupe\n    q: q\n    a: a\n")},
 		"decks/b.yaml": {Data: []byte("deck: B\ncards:\n  - id: dupe\n    q: q\n    a: a\n")},
 	}
+
 	_, err := deck.Load(fsys, "decks")
 	if err == nil || !strings.Contains(err.Error(), "duplicate card id") {
 		t.Fatalf("expected duplicate id error, got %v", err)
@@ -108,16 +123,21 @@ func TestDuplicateIDsAcrossDecksAreRejected(t *testing.T) {
 }
 
 func TestLoadEmptyDirIsAnError(t *testing.T) {
+	t.Parallel()
+
 	if _, err := deck.Load(fstest.MapFS{}, "decks"); err == nil {
 		t.Fatal("expected an error for a directory with no decks")
 	}
 }
 
 func TestDeckTagsMergeIntoCards(t *testing.T) {
+	t.Parallel()
+
 	lib, err := loadOne(t, "deck: D\ntags: [shared]\ncards:\n  - id: a\n    q: q\n    a: a\n    tags: [own]\n")
 	if err != nil {
 		t.Fatal(err)
 	}
+
 	c, _ := lib.Get("a")
 	if len(c.Tags) != 2 || c.Tags[0] != "own" || c.Tags[1] != "shared" {
 		t.Errorf("expected card and deck tags merged, got %v", c.Tags)
@@ -125,10 +145,13 @@ func TestDeckTagsMergeIntoCards(t *testing.T) {
 }
 
 func TestFilter(t *testing.T) {
+	t.Parallel()
+
 	fsys := fstest.MapFS{
 		"decks/01-one.yaml": {Data: []byte("deck: One\nmodule: M1\ncards:\n  - id: a\n    q: q\n    a: a\n    tags: [rbac]\n")},
 		"decks/02-two.yaml": {Data: []byte("deck: Two\nmodule: M2\ncards:\n  - id: b\n    q: q\n    a: a\n    tags: [probes]\n")},
 	}
+
 	lib, err := deck.Load(fsys, "decks")
 	if err != nil {
 		t.Fatal(err)
@@ -149,6 +172,8 @@ func TestFilter(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
 			if got := len(lib.Select(tt.filter)); got != tt.want {
 				t.Errorf("got %d cards, want %d", got, tt.want)
 			}
