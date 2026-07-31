@@ -1,0 +1,36 @@
+#!/bin/sh
+#
+# Fast gates, run on every commit. Target is ~1s: anything slower gets skipped
+# with --no-verify, and a hook people routinely bypass protects nothing.
+#
+# These call the same make targets you run by hand, so there is one definition
+# of each check rather than a copy that drifts.
+#
+# Deliberately NOT here (see .githooks/pre-push):
+#   make vuln    — queries vuln.go.dev, so it fails offline, and it fails when
+#                  someone publishes a CVE in a dependency you did not touch.
+#                  That is time-varying, not change-varying: wrong shape for a
+#                  gate on an individual commit.
+#   make verify  — go.mod/go.sum drift is worth catching before a push, but it
+#                  is not something a single commit usually breaks.
+#   make scan    — needs Docker and an image build.
+set -e
+
+repo="$(git rev-parse --show-toplevel)"
+
+# Only run the Go gates when Go files or the module are actually staged.
+if git diff --cached --name-only --diff-filter=ACMR | grep -qE '^flashcards/.*\.(go|mod|sum)$|^flashcards/\.golangci\.yml$'; then
+	echo "pre-commit: go gates"
+	make -C "$repo/flashcards" fmt-check lint test
+fi
+
+if git diff --cached --name-only --diff-filter=ACMR | grep -q '^flashcards/Dockerfile$'; then
+	echo "pre-commit: dockerfile"
+	make -C "$repo/flashcards" dockerfile-lint
+fi
+
+# Always: a committed secret is painful to remove from history, so this is the
+# one check worth paying for on every commit regardless of what changed.
+# --staged scans only what is being committed, so cost stays flat as history grows.
+echo "pre-commit: secrets"
+gitleaks git --staged --config "$repo/.gitleaks.toml" --no-banner --redact

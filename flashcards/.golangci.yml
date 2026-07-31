@@ -53,6 +53,10 @@ linters:
     - fatcontext       # context.WithValue/WithCancel in loops (unbounded context chain, memory leak)
     - sqlclosecheck    # unclosed sql.Rows and sql.Stmt
     - rowserrcheck     # unchecked sql.Rows.Err() after iteration
+    # observability
+    - spancheck        # OpenTelemetry: unended spans, missing SetStatus/RecordError on error paths.
+                       # Enabled ahead of the OTel work so the rules are in force from the first
+                       # span rather than being retrofitted; inert until spans exist.
     # logging
     - sloglint         # consistent log/slog code style
     - loggercheck      # key-value pair validation for structured loggers (zap, slog, logr)
@@ -98,7 +102,6 @@ linters:
     - recvcheck        # receiver type consistency — overlaps with gocritic
     - mirror           # bytes/strings mirror patterns — very few real hits
     - protogetter      # proto field access via getters — only for protobuf users
-    - spancheck        # OpenTelemetry span checks — only for OTel users
     - zerologlint      # zerolog usage — only for zerolog users
 
   exclusions:

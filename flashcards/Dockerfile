@@ -5,7 +5,11 @@
 # interview asks: with no shell, `kubectl exec -it ... -- sh` will not work.
 # Use `kubectl debug` and an ephemeral container instead.
 
-FROM golang:1.26-alpine AS build
+# Base images are pinned by digest, not tag. `golang:1.26-alpine` is mutable: the
+# same tag resolves to different content over time, so a tag-only build is not
+# reproducible and a compromised or regressed base can land silently. Refresh
+# with `make base-digests`, which prints the current digest for each tag.
+FROM golang:1.26-alpine@sha256:0178a641fbb4858c5f1b48e34bdaabe0350a330a1b1149aabd498d0699ff5fb2 AS build
 WORKDIR /src
 
 # Copy manifests first so dependency download caches independently of source.
@@ -23,7 +27,7 @@ RUN CGO_ENABLED=0 GOOS=linux go build \
 # Run the tests inside the build so a broken deck can't ship.
 RUN go test ./...
 
-FROM gcr.io/distroless/static-debian12:nonroot
+FROM gcr.io/distroless/static-debian12:nonroot@sha256:f5b485ea962d9bd1186b2f6b3a061191539b905b82ec395de78cbfae51f20e35
 
 # 65532 is distroless' "nonroot" user. Running as non-root is what lets the
 # Pod spec set runAsNonRoot: true in M3.

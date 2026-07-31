@@ -1,14 +1,15 @@
-IMAGE   ?= k8s-flashcards
-TAG     ?= dev
-CLUSTER ?= k8s-training
-PORT    ?= 8080
+IMAGE    ?= k8s-flashcards
+TAG      ?= dev
+CLUSTER  ?= k8s-training
+PORT     ?= 8080
+FUZZTIME ?= 60s
 
 .DEFAULT_GOAL := help
 
 .PHONY: help
 help: ## Show this help
 	@grep -hE '^[a-zA-Z_-]+:.*?## ' $(MAKEFILE_LIST) \
-	  | awk 'BEGIN{FS=":.*?## "}{printf "  \033[36m%-12s\033[0m %s\n", $$1, $$2}'
+	  | awk 'BEGIN{FS=":.*?## "}{printf "  \033[36m%-16s\033[0m %s\n", $$1, $$2}'
 
 .PHONY: run
 run: ## Run locally on http://localhost:$(PORT)
@@ -48,15 +49,55 @@ verify: ## Verify module checksums and that go.mod/go.sum are tidy
 	go mod verify
 	go mod tidy -diff
 
+.PHONY: secrets
+secrets: ## Scan the whole repo, including git history, for committed secrets
+	gitleaks detect --source .. --config ../.gitleaks.toml --no-banner --redact
+
+.PHONY: dockerfile-lint
+dockerfile-lint: ## Lint the Dockerfile (info-level nits reported, not fatal)
+	hadolint --failure-threshold warning Dockerfile
+
+.PHONY: fuzz
+fuzz: ## Fuzz the deck parser for $(FUZZTIME) (seed corpus also runs in `make test`)
+	go test -run=XXX -fuzz=FuzzLoad -fuzztime=$(FUZZTIME) ./internal/deck/
+
 .PHONY: check
-check: fmt-check lint vuln verify test ## Run every quality gate (what CI would run)
+check: fmt-check lint vuln verify secrets dockerfile-lint test ## Every fast gate; no Docker needed
 	@echo "all checks passed"
+
+# --- Image scanning ----------------------------------------------------------
+# Split from `check` because it needs Docker and an image build. `check` stays
+# fast enough to run before every commit; this runs before a push or a deploy.
+
+.PHONY: scan
+scan: image ## Scan the built image for CVEs and secrets (needs Docker)
+	trivy image --scanners vuln,secret --exit-code 1 \
+	  --severity HIGH,CRITICAL --ignore-unfixed $(IMAGE):$(TAG)
+
+.PHONY: check-all
+check-all: check scan ## Everything, including the image scan
+	@echo "all checks and scans passed"
+
+.PHONY: base-digests
+base-digests: ## Print current digests for the Dockerfile's base image tags
+	@for ref in golang:1.26-alpine gcr.io/distroless/static-debian12:nonroot; do \
+	  printf '%-48s %s\n' "$$ref" \
+	    "$$(docker buildx imagetools inspect $$ref 2>/dev/null | awk '/^Digest:/{print $$2}')"; \
+	done
+
+.PHONY: hooks
+hooks: ## Enable the repo's git hooks (one-time, per clone)
+	git -C .. config core.hooksPath .githooks
+	@echo "core.hooksPath -> .githooks (pre-commit: fast gates; pre-push: make check)"
 
 .PHONY: tools
 tools: ## Report whether the local toolchain is present
 	@printf 'go            %s\n' "$$(go version 2>/dev/null || echo MISSING)"
 	@printf 'golangci-lint %s\n' "$$(golangci-lint version 2>/dev/null || echo 'MISSING - brew install golangci-lint')"
 	@printf 'govulncheck   %s\n' "$$(go tool govulncheck -version 2>/dev/null | grep Scanner || echo 'MISSING - go get -tool golang.org/x/vuln/cmd/govulncheck')"
+	@printf 'gitleaks      %s\n' "$$(gitleaks version 2>/dev/null || echo 'MISSING - brew install gitleaks')"
+	@printf 'hadolint      %s\n' "$$(hadolint --version 2>/dev/null || echo 'MISSING - brew install hadolint')"
+	@printf 'trivy         %s\n' "$$(trivy --version 2>/dev/null | head -1 || echo 'MISSING - brew install trivy')"
 
 .PHONY: build
 build: ## Build the binary into ./bin

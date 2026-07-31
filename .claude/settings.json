@@ -1,0 +1,10 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(trivy --version)",
+      "Bash(gitleaks version *)",
+      "Bash(hadolint --version)",
+      "Bash(trivy image *)"
+    ]
+  }
+}

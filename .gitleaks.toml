@@ -1,0 +1,17 @@
+# gitleaks config for the training repo.
+#
+# Scanning covers the whole repository, not just flashcards/, because manifests
+# under modules/ are exactly where a real credential would end up.
+
+[extend]
+useDefault = true
+
+[[allowlists]]
+description = """
+Vendored Claude skill content under .claude/skills/ is third-party documentation,
+not source. The golang-security skill deliberately contains fake credentials as
+'Bad:' examples (AKIAIOSFODNN7EXAMPLE is AWS's own published placeholder), which
+gitleaks scores as generic-api-key hits. Allowlisted by path so real findings in
+our own code stay visible.
+"""
+paths = ['''^\.claude/skills/''']

@@ -1,0 +1,14 @@
+#!/bin/sh
+#
+# The full fast gate, run before anything leaves the machine. This is where the
+# checks that pre-commit deliberately skips belong: govulncheck (network, and
+# time-varying) and module verification.
+#
+# Still excludes `make scan` — that needs Docker and an image build. Run
+# `make check-all` by hand before a deploy, or wire it into CI later.
+set -e
+
+repo="$(git rev-parse --show-toplevel)"
+
+echo "pre-push: make check"
+make -C "$repo/flashcards" check
