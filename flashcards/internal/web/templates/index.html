@@ -1,0 +1,46 @@
+{{template "head" "Dashboard"}}
+
+<div class="statline">
+  <div><b>{{.Total.Due}}</b> due now</div>
+  <div><b>{{.Total.New}}</b> unseen</div>
+  <div><b>{{.Total.Known}}</b> known</div>
+  <div><b>{{.Total.ReviewsToday}}</b> reviewed today</div>
+  <div><b>{{.Streak}}</b> day streak</div>
+</div>
+
+<p><a href="/drill"><strong>Drill everything due →</strong></a>
+  <span class="muted small">or pick a deck below</span></p>
+
+<table>
+  <thead>
+    <tr>
+      <th>Deck</th><th>Module</th>
+      <th class="num">Due</th><th class="num">New</th><th class="num">Cards</th>
+    </tr>
+  </thead>
+  <tbody>
+  {{range .Decks}}
+    <tr>
+      <td><a href="/drill?deck={{.File}}">{{.Name}}</a></td>
+      <td>{{with .Module}}<span class="pill">{{.}}</span>{{end}}</td>
+      <td class="num">{{if .Stats.Due}}<strong>{{.Stats.Due}}</strong>{{else}}<span class="muted">0</span>{{end}}</td>
+      <td class="num muted">{{.Stats.New}}</td>
+      <td class="num muted">{{.Stats.Total}}</td>
+    </tr>
+  {{end}}
+  </tbody>
+</table>
+
+<p class="muted small" style="margin-top:2rem">
+  Grades are scheduled with FSRS: <em>Again</em> brings a card back within
+  minutes, <em>Easy</em> pushes it out days. Review state lives in a JSON file —
+  which is exactly why it disappears if you run this on Kubernetes without a
+  volume.
+</p>
+
+<h3 style="font-size:.8125rem;text-transform:uppercase;letter-spacing:.06em;color:var(--muted);margin-top:2rem">Tags</h3>
+<div class="tags">
+  {{range .Tags}}<a href="/drill?tag={{.}}">{{.}}</a>{{end}}
+</div>
+
+{{template "foot"}}

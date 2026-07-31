@@ -1,0 +1,381 @@
+deck: Production concerns — resources, probes, scaling, disruption, Helm
+module: M3
+tags: [production]
+
+cards:
+  - id: m3-requests-vs-limits
+    q: |
+      What's the difference between a resource `request` and a `limit`?
+    a: |
+      **Request** — what the scheduler reserves for you. It decides placement
+      and is your guaranteed floor.
+
+      **Limit** — the hard ceiling the runtime enforces at runtime.
+
+      The scheduler only ever looks at requests. Limits do nothing for
+      scheduling.
+    ecs: |
+      ECS gives you one CPU/memory number per task; K8s splits it in two. The
+      split is the whole lesson: requests are a capacity-planning statement,
+      limits are a blast-radius statement.
+    tags: [resources, scheduling]
+
+  - id: m3-cpu-vs-memory-limits
+    q: |
+      What happens when a container exceeds its CPU limit vs its memory limit?
+    a: |
+      **CPU is compressible** — you get throttled (CFS quota). Slow, not dead.
+
+      **Memory is not** — exceeding it gets the process **OOMKilled** and
+      restarted.
+
+      That asymmetry is why the common advice is: always set memory limits, be
+      careful setting CPU limits too tight.
+    ecs: |
+      Same kernel behavior you've seen with ECS task memory limits (hard vs
+      soft). The difference is you now control it per container, explicitly.
+    tags: [resources, oom, throttling]
+
+  - id: m3-qos-classes
+    q: |
+      Name the three QoS classes and how a Pod lands in each.
+    a: |
+      - **Guaranteed** — every container sets requests == limits for both CPU
+        and memory.
+      - **Burstable** — requests set, but less than limits (or partially set).
+      - **BestEffort** — nothing set at all.
+
+      Under node memory pressure the kubelet evicts BestEffort first, then
+      Burstable. Guaranteed is evicted last.
+    ecs: |
+      **No ECS equivalent.** ECS doesn't rank tasks for eviction this way — this
+      is a real K8s-only lever, and the reason "no requests set" is a production
+      liability, not just untidy.
+    tags: [resources, qos, eviction]
+
+  - id: m3-no-requests-consequence
+    q: |
+      Concretely, what goes wrong when a Deployment sets no requests or limits?
+    a: |
+      The scheduler thinks the Pod is free, so it overpacks nodes. The Pod is
+      BestEffort, so it's the first evicted under pressure. One leaky container
+      can starve its neighbors.
+
+      Result: a noisy-neighbor incident that looks like random unrelated
+      services degrading.
+    ecs: |
+      The EC2-backed ECS version of this is tasks with no reservations packing
+      an instance until everything degrades. Recognizable — and here it's the
+      default unless you act.
+    tags: [resources, production-realism, incident]
+
+  - id: m3-three-probes
+    q: |
+      What do the liveness, readiness, and startup probes each decide?
+    a: |
+      - **Liveness** — is it broken? Failure ⇒ kubelet **restarts** the
+        container.
+      - **Readiness** — should it get traffic? Failure ⇒ removed from Service
+        endpoints, not restarted.
+      - **Startup** — is it still booting? While it runs, liveness/readiness are
+        suppressed.
+    ecs: |
+      ECS/ALB health checks only ever did the readiness job (gate LB traffic).
+      Liveness restarting your container has no ECS analog at the task level —
+      and it's the one that can hurt you if you get it wrong.
+    tags: [probes, health]
+
+  - id: m3-liveness-danger
+    q: |
+      Why can a badly written liveness probe be worse than none at all?
+    a: |
+      Because it restarts containers. If it checks a *dependency* (database,
+      downstream API), a dependency outage becomes a cluster-wide restart storm
+      — every replica killed repeatedly while the app itself is fine.
+
+      Liveness should test only "is this process wedged?" Dependencies belong in
+      readiness.
+    tags: [probes, gotcha, incident, production-realism]
+
+  - id: m3-startup-probe-purpose
+    q: |
+      What problem does a startup probe solve?
+    a: |
+      Slow-starting apps (JVMs, big caches) would otherwise need a liveness
+      `initialDelaySeconds` long enough for the worst-case boot — which makes
+      liveness useless afterward.
+
+      A startup probe gets a generous budget for boot; once it passes, liveness
+      can be tight and fast.
+    tags: [probes, health]
+
+  - id: m3-readiness-during-rollout
+    q: |
+      How do readiness probes affect a rolling update?
+    a: |
+      A new Pod doesn't count as available until it's Ready, and the rollout
+      won't proceed past `maxUnavailable` until enough Pods are.
+
+      Without readiness probes the rollout marches ahead at process-start speed
+      and sends traffic to Pods that can't serve it — the classic "deploy caused
+      a blip" bug.
+    tags: [probes, rollout, production-realism]
+
+  - id: m3-graceful-shutdown
+    q: |
+      Walk through what happens to a Pod during termination.
+    a: |
+      1. Pod marked Terminating; **simultaneously** removed from endpoints and
+         sent SIGTERM.
+      2. `preStop` hook (if any) runs first.
+      3. App should stop accepting new work and drain in-flight requests.
+      4. After `terminationGracePeriodSeconds` (default 30), SIGKILL.
+
+      Step 1 is racy: endpoint removal propagates asynchronously, so a brief
+      `preStop` sleep is the standard trick to avoid dropped requests.
+    ecs: |
+      ECS `stopTimeout` + SIGTERM is the same contract, and ALB deregistration
+      delay is the same race. If you've tuned deregistration delay, you already
+      understand the `preStop` sleep.
+    tags: [lifecycle, shutdown, production-realism]
+
+  - id: m3-hpa
+    q: |
+      What does an HPA scale, on what signal, and what does it need installed?
+    a: |
+      It scales a Deployment's **replica count** based on observed metrics
+      (CPU/memory utilization, or custom/external metrics).
+
+      It requires **metrics-server** for the resource metrics — a fresh cluster
+      has no metrics API at all, and the HPA silently reports `<unknown>`.
+    ecs: |
+      ECS Service auto scaling with target tracking. Note K8s splits scaling
+      into two layers: HPA for Pods, Cluster Autoscaler/Karpenter for nodes.
+    tags: [hpa, autoscaling]
+
+  - id: m3-hpa-needs-requests
+    q: |
+      Why does a CPU-based HPA do nothing if you didn't set resource requests?
+    a: |
+      HPA computes utilization as a **percentage of the request**. With no
+      request there's no denominator, so it can't compute a target and won't
+      scale.
+
+      Requests aren't just for scheduling — autoscaling depends on them too.
+    tags: [hpa, resources, gotcha]
+
+  - id: m3-hpa-vs-vpa
+    q: |
+      HPA vs VPA — and why not both on the same metric?
+    a: |
+      **HPA** changes the number of Pods. **VPA** changes each Pod's
+      requests/limits.
+
+      Running both on CPU fights: VPA lowers the request, which raises measured
+      utilization, which makes HPA scale out, and so on. Use VPA for
+      right-sizing recommendations, HPA for live traffic response.
+    tags: [hpa, vpa, autoscaling, gotcha]
+
+  - id: m3-pdb
+    q: |
+      What does a PodDisruptionBudget protect against — and what does it *not*?
+    a: |
+      It constrains **voluntary** disruptions (node drains, cluster upgrades,
+      `kubectl drain`): "keep at least N available."
+
+      It does **not** protect against involuntary disruption — node crashes,
+      OOM kills, preemption. Nothing can.
+    ecs: |
+      Closest ECS framing: preventing a capacity rebalance or instance
+      replacement from taking your service down. ECS has no explicit object for
+      this; K8s makes it declarative.
+    tags: [pdb, disruption, availability]
+
+  - id: m3-pdb-deadlock
+    q: |
+      How can a PDB block a node drain forever?
+    a: |
+      `minAvailable` equal to (or above) the replica count — e.g. 1 replica with
+      `minAvailable: 1`. Evicting the only Pod would violate the budget, so the
+      drain blocks indefinitely.
+
+      A PDB requires enough replicas to have slack. This is a real way to wedge
+      a cluster upgrade.
+    tags: [pdb, gotcha, incident]
+
+  - id: m3-topology-spread
+    q: |
+      What do topology spread constraints do?
+    a: |
+      Force replicas to spread across a topology domain — nodes, or
+      `topology.kubernetes.io/zone` for AZs — with a `maxSkew` tolerance.
+
+      Without them the scheduler may pack every replica onto one node or one AZ,
+      and a single failure takes the whole service down.
+    ecs: |
+      ECS spread placement strategies across AZs — which ECS does *for* you by
+      default. In K8s this is opt-in workload configuration you own.
+    tags: [scheduling, availability, multi-az]
+
+  - id: m3-affinity-vs-anti-affinity
+    q: |
+      Pod affinity vs anti-affinity, and required vs preferred?
+    a: |
+      **Affinity** attracts Pods to nodes where matching Pods run;
+      **anti-affinity** repels (spread replicas apart).
+
+      `requiredDuringScheduling...` is a hard constraint — unsatisfiable means
+      Pending forever. `preferredDuringScheduling...` is a soft weight. Prefer
+      soft unless you truly mean "never co-locate."
+    tags: [scheduling, availability]
+
+  - id: m3-taints-tolerations
+    q: |
+      Taints vs tolerations vs node selectors — which direction does each work?
+    a: |
+      A **taint** is on the node: "repel Pods unless they tolerate me."
+      A **toleration** is on the Pod: "I can put up with that taint."
+      A **nodeSelector/affinity** is on the Pod: "I want nodes like this."
+
+      Tolerations grant permission; they don't attract. To *require* a node type
+      you need both a toleration and a selector.
+    ecs: |
+      ECS placement constraints, but two-sided. The taint side (node pushing
+      back) has no ECS analog.
+    tags: [scheduling, taints, gotcha]
+
+  - id: m3-networkpolicy-default
+    q: |
+      What is a Pod's network exposure before any NetworkPolicy exists?
+    a: |
+      Fully open — any Pod in the cluster can reach any other Pod, across
+      namespaces.
+
+      NetworkPolicies are additive allow-lists, and the moment a Pod is selected
+      by *any* policy it becomes default-deny for that direction. The standard
+      pattern is a default-deny policy plus explicit allows.
+    ecs: |
+      This is a real downgrade from ECS `awsvpc`, where every task has a
+      security group. Kubernetes' default is open; you must opt into isolation.
+    tags: [networkpolicy, security, production-realism]
+
+  - id: m3-networkpolicy-needs-cni
+    q: |
+      What's the trap with NetworkPolicy on a fresh cluster?
+    a: |
+      NetworkPolicy is enforced by the **CNI plugin**, not by Kubernetes. If the
+      plugin doesn't implement it (KIND's default kindnet, some setups), the
+      objects apply cleanly and silently enforce nothing.
+
+      Always verify with an actual connection test.
+    tags: [networkpolicy, cni, gotcha]
+
+  - id: m3-ingress
+    q: |
+      What is an Ingress, and what makes it actually do something?
+    a: |
+      An Ingress is L7 HTTP routing rules — host/path → Service. It's inert on
+      its own: an **ingress controller** (NGINX, Traefik, AWS Load Balancer
+      Controller) must be running to implement it.
+
+      No controller ⇒ the object exists and nothing happens.
+    ecs: |
+      ALB + listener rules + target groups. On EKS the AWS Load Balancer
+      Controller literally provisions an ALB from your Ingress — the closest
+      one-to-one mapping in the whole model.
+    tags: [ingress, networking]
+
+  - id: m3-gateway-api
+    q: |
+      What is the Gateway API and why does it exist?
+    a: |
+      The successor to Ingress. Ingress ran out of room — every implementation
+      grew its own annotations, so manifests stopped being portable.
+
+      Gateway API splits responsibilities into typed resources
+      (GatewayClass / Gateway / HTTPRoute), giving infra and app teams separate
+      objects with real schemas instead of annotation soup.
+    tags: [ingress, gateway-api, networking]
+
+  - id: m3-helm-chart-release-values
+    q: |
+      Define chart, values, and release in Helm.
+    a: |
+      - **Chart** — the package: templates + default `values.yaml`.
+      - **Values** — the parameters you override per environment.
+      - **Release** — one installed instance of a chart in a cluster, with a
+        revision history you can roll back.
+
+          helm upgrade --install flashcards ./chart -f values-prod.yaml
+    ecs: |
+      Roughly a CloudFormation/CDK stack: a parameterized template plus a
+      deployed instance with revisions. Helm is templating + release state, not
+      a controller.
+    tags: [helm, packaging]
+
+  - id: m3-helm-rollback
+    q: |
+      How do you inspect and reverse a Helm release?
+    a: |
+      ```
+      helm history flashcards
+      helm rollback flashcards 3
+      helm get manifest flashcards      # what's actually deployed
+      helm template ./chart             # render locally, apply nothing
+      ```
+
+      `helm template` is the one to reach for when debugging "why did it render
+      that."
+    tags: [helm, rollback, debugging]
+
+  - id: m3-zero-downtime-upgrade
+    q: |
+      What does a `helm upgrade` need in place to avoid dropping traffic?
+    a: |
+      Nothing in Helm itself — it's the underlying Deployment's job:
+      - readiness probes (so new Pods take traffic only when ready)
+      - `maxUnavailable: 0` and sane `maxSurge`
+      - graceful shutdown + `preStop` on the old Pods
+      - more than one replica
+      - a PDB for concurrent node disruption
+
+      Helm just applies the manifest; the rollout guarantees come from the spec.
+    tags: [helm, rollout, capstone, production-realism]
+
+  - id: m3-pvc-pv-storageclass
+    q: |
+      How do PVC, PV, and StorageClass relate?
+    a: |
+      A **PVC** is the workload's request ("10Gi, ReadWriteOnce"). A **PV** is
+      the actual volume. A **StorageClass** describes a provisioner that creates
+      PVs on demand, so you rarely author PVs by hand.
+    ecs: |
+      EFS/EBS volumes attached to a task, but with a claim/supply indirection so
+      the manifest stays portable across clusters and cloud providers.
+    tags: [storage, pvc]
+
+  - id: m3-ebs-single-az
+    q: |
+      Why can an EBS-backed PVC leave a Pod stuck Pending?
+    a: |
+      EBS volumes are **single-AZ** and `ReadWriteOnce`. A Pod bound to that PVC
+      can only schedule onto a node in that AZ; if there's no capacity there, it
+      stays Pending even though the cluster has room elsewhere.
+
+      Classic multi-AZ gotcha. EFS (ReadWriteMany, cross-AZ) sidesteps it.
+    ecs: |
+      Same constraint you'd hit attaching an EBS volume to an ECS task on EC2 —
+      but here it silently blocks scheduling instead of failing loudly.
+    tags: [storage, eks, multi-az, gotcha, aws-specific]
+
+  - id: m3-node-pressure-eviction
+    q: |
+      What is node-pressure eviction and how does it differ from an OOM kill?
+    a: |
+      When a node runs low on memory or disk, the **kubelet** proactively evicts
+      Pods (BestEffort first) to reclaim resources — the Pod is removed and
+      rescheduled elsewhere.
+
+      An **OOM kill** is the kernel killing one container that exceeded its own
+      memory limit; the Pod stays put and restarts in place.
+    tags: [eviction, resources, debugging]

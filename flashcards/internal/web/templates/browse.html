@@ -1,0 +1,25 @@
+{{template "head" "Browse"}}
+
+<p class="muted small">{{len .Cards}} cards · scope: <strong>{{.Filter.Label}}</strong> ·
+  <a href="/browse">all</a> · <a href="/drill{{.Filter.Query}}">drill this scope</a></p>
+
+{{range .Cards}}
+<div class="card">
+  <div class="meta">{{with .Card.Module}}{{.}} · {{end}}{{.Card.Deck}}</div>
+  <div class="q">{{.Q}}</div>
+  <div class="a">{{.A}}</div>
+  {{with .ECS}}
+  <div class="ecs">
+    <h4>Coming from ECS</h4>
+    {{.}}
+  </div>
+  {{end}}
+  <div class="tags">
+    {{range .Card.Tags}}<a href="/browse?tag={{.}}">{{.}}</a>{{end}}
+  </div>
+</div>
+{{else}}
+<p>No cards match that filter. <a href="/browse">Show all</a>.</p>
+{{end}}
+
+{{template "foot"}}

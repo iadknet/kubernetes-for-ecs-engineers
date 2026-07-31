@@ -1,0 +1,252 @@
+deck: Observability — Prometheus, Grafana, Loki
+module: M4
+tags: [observability]
+
+cards:
+  - id: m4-nothing-built-in
+    q: |
+      What does Kubernetes ship for logs, metrics, and traces out of the box?
+    a: |
+      Essentially nothing. Container stdout/stderr is written to files on the
+      node and rotated; there is no aggregation, no retention, no metrics
+      backend, no tracing.
+
+      You install and own the entire stack.
+    ecs: |
+      A genuine capability gap, not a renaming. ECS gives you the `awslogs`
+      driver and CloudWatch Container Insights essentially for free. Here,
+      logging and monitoring are your responsibility from day one.
+    tags: [observability, production-realism, gap]
+
+  - id: m4-kubectl-logs-limits
+    q: |
+      Why are `kubectl logs` and `kubectl top` not a monitoring strategy?
+    a: |
+      `kubectl logs` reads the node's current log file — deleted Pods take their
+      logs with them, and `--previous` only reaches back one restart.
+      `kubectl top` is an instantaneous sample with no history and no alerting.
+
+      Both are debugging tools for something you already know is broken.
+    tags: [observability, debugging, kubectl]
+
+  - id: m4-prometheus-pull
+    q: |
+      How does Prometheus collect metrics, and why does that model suit
+      Kubernetes?
+    a: |
+      It **pulls** — scraping an HTTP `/metrics` endpoint on each target on an
+      interval, discovering targets from the Kubernetes API.
+
+      That fits a world where Pods are created and destroyed constantly: targets
+      appear and disappear via service discovery instead of registering
+      themselves.
+    ecs: |
+      CloudWatch is push-based (agent/SDK sends metrics out). Inverting to pull
+      is the main mental adjustment, and it's why a Pod must *expose* metrics
+      rather than ship them.
+    tags: [prometheus, metrics]
+
+  - id: m4-metric-types
+    q: |
+      Name the four Prometheus metric types.
+    a: |
+      - **Counter** — only goes up (requests total, errors total); query with
+        `rate()`.
+      - **Gauge** — goes up and down (in-flight requests, queue depth).
+      - **Histogram** — bucketed observations; percentiles computed server-side
+        via `histogram_quantile()`.
+      - **Summary** — client-side quantiles; can't be aggregated across Pods.
+
+      Prefer histograms over summaries for latency in a multi-replica service.
+    tags: [prometheus, metrics]
+
+  - id: m4-cardinality
+    q: |
+      What is cardinality and why does it take down Prometheus?
+    a: |
+      Every unique combination of label values is a separate time series. Put a
+      user ID, request ID, or raw URL path in a label and you create unbounded
+      series, exhausting memory.
+
+      Labels must be low-cardinality and bounded: status code, method, route
+      *template* — never the raw value.
+    tags: [prometheus, gotcha, production-realism]
+
+  - id: m4-servicemonitor
+    q: |
+      What is a ServiceMonitor?
+    a: |
+      A **CRD** from the Prometheus Operator that declares "scrape the Pods
+      behind this Service, on this port and path."
+
+      It means scrape config is declarative Kubernetes YAML that lives with the
+      app, instead of a hand-edited central `prometheus.yml`.
+    tags: [prometheus, crd, operator]
+
+  - id: m4-promql-rate
+    q: |
+      Why is `rate(http_requests_total[5m])` the standard idiom rather than
+      using the counter directly?
+    a: |
+      A counter's raw value is meaningless (it resets when a Pod restarts).
+      `rate()` gives per-second change over the window and handles resets
+      correctly.
+
+      Error ratio:
+
+          sum(rate(http_requests_total{code=~"5.."}[5m]))
+            / sum(rate(http_requests_total[5m]))
+    tags: [prometheus, promql]
+
+  - id: m4-metrics-server-vs-prometheus
+    q: |
+      metrics-server vs Prometheus — do you need both?
+    a: |
+      Yes, they do different jobs. **metrics-server** serves only current
+      CPU/memory through the Metrics API, for `kubectl top` and the HPA. No
+      history, no queries, no alerting.
+
+      **Prometheus** is the actual monitoring system. It does not replace
+      metrics-server for HPA resource metrics.
+    tags: [prometheus, hpa, metrics]
+
+  - id: m4-alertmanager
+    q: |
+      What does Alertmanager do that Prometheus doesn't?
+    a: |
+      Prometheus evaluates alert rules and fires them. **Alertmanager** handles
+      everything after: grouping, deduplication, silencing, inhibition, and
+      routing to PagerDuty/Slack/email.
+
+      Inhibition is the one worth knowing — suppress the 200 downstream alerts
+      when the one upstream cause already fired.
+    tags: [alerting, prometheus]
+
+  - id: m4-alert-for-clause
+    q: |
+      What does the `for:` clause in an alerting rule do, and why does it matter
+      for on-call?
+    a: |
+      The condition must stay true continuously for that duration before the
+      alert fires — suppressing single-scrape blips.
+
+      It's the main dial for the false-positive rate. An alert with no `for:` on
+      a noisy signal is how you burn out a rotation.
+    tags: [alerting, on-call, production-realism]
+
+  - id: m4-loki
+    q: |
+      What is Loki and how is it different from Elasticsearch?
+    a: |
+      A log aggregator that indexes only **labels**, not log contents, storing
+      compressed chunks in object storage. Much cheaper, and its label model
+      matches Prometheus so the same labels work across metrics and logs.
+
+      Trade-off: full-text search is a brute-force scan over the selected
+      streams, so queries must be narrowed by label first.
+    ecs: |
+      CloudWatch Logs Insights fills this role for ECS. Loki is the self-hosted
+      equivalent — and label discipline matters here for the same reason
+      cardinality does in Prometheus.
+    tags: [loki, logs]
+
+  - id: m4-log-shipper-daemonset
+    q: |
+      How do logs physically get from a container into Loki or CloudWatch?
+    a: |
+      A **DaemonSet** log shipper (Promtail/Alloy, Fluent Bit, Vector) runs one
+      Pod per node, tails `/var/log/containers/*.log` from the host, enriches
+      with Pod metadata from the API, and forwards.
+
+      Which is why apps should log to **stdout/stderr**, not to files inside the
+      container.
+    ecs: |
+      The `awslogs` log driver does this invisibly per task. Here it's a
+      workload you deploy, monitor, and can break.
+    tags: [logs, daemonset, loki]
+
+  - id: m4-red-use
+    q: |
+      What are the RED and USE methods?
+    a: |
+      **RED** (request-driven services): **R**ate, **E**rrors, **D**uration.
+      **USE** (resources): **U**tilization, **S**aturation, **E**rrors.
+
+      RED for your service's API; USE for nodes, disks, and queues. Together
+      they cover "is my service healthy" and "is the thing under it healthy."
+    tags: [methodology, sre, acronym]
+
+  - id: m4-sli-slo-error-budget
+    q: |
+      Define SLI, SLO, and error budget.
+    a: |
+      **SLI** — the measurement (99.2% of requests succeeded).
+      **SLO** — the target (99.9% over 30 days).
+      **Error budget** — 100% − SLO; the failure you're *allowed*.
+
+      The budget is the point: it converts reliability from an argument into an
+      arithmetic decision about whether to ship or stabilize.
+    tags: [sre, slo, methodology, acronym]
+
+  - id: m4-burn-rate-alerting
+    q: |
+      Why alert on error-budget burn rate instead of a raw threshold?
+    a: |
+      A fixed threshold ("error rate > 1%") fires on brief, harmless blips and
+      misses slow bleeds. Burn rate asks "at this pace, how fast am I consuming
+      the month's budget?"
+
+      Multi-window burn-rate alerts (fast burn ⇒ page, slow burn ⇒ ticket) are
+      the standard low-false-positive pattern.
+    tags: [alerting, slo, on-call, production-realism]
+
+  - id: m4-golden-signals
+    q: |
+      What are the four golden signals?
+    a: |
+      Latency, traffic, errors, saturation.
+
+      Same intent as RED, plus saturation — how close the system is to its
+      limits, which is what tells you the incident is coming rather than that it
+      arrived.
+    tags: [methodology, sre]
+
+  - id: m4-otel
+    q: |
+      What is OpenTelemetry and what does it replace?
+    a: |
+      A vendor-neutral standard and SDK set for traces, metrics, and logs, plus
+      the **Collector** — a pipeline you run to receive, process, and export
+      telemetry anywhere.
+
+      It replaces per-vendor agents and instrumentation, so switching backends
+      doesn't mean re-instrumenting the app.
+    ecs: |
+      AWS Distro for OpenTelemetry (ADOT) is the same thing — you may already
+      have run it as an ECS sidecar. On K8s it's usually a DaemonSet or
+      Deployment.
+    tags: [tracing, otel, standards, acronym]
+
+  - id: m4-instrument-go-service
+    q: |
+      What's the minimum to make a Go service scrapeable?
+    a: |
+      Import `github.com/prometheus/client_golang/prometheus/promhttp`, register
+      your collectors, and serve:
+
+          mux.Handle("GET /metrics", promhttp.Handler())
+
+      You get Go runtime and process metrics for free; add a request counter and
+      a latency histogram for RED.
+    tags: [prometheus, go, instrumentation]
+
+  - id: m4-eks-observability
+    q: |
+      What's the AWS-native observability stack on EKS, and what's the catch?
+    a: |
+      Container Insights, Fluent Bit → CloudWatch Logs, and managed Prometheus
+      (AMP) + managed Grafana (AMG).
+
+      The catch: **none of it is on by default.** Every piece is an add-on you
+      install and configure — unlike ECS, where `awslogs` just works.
+    tags: [eks, observability, aws-specific]

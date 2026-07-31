@@ -1,0 +1,272 @@
+deck: Kubernetes development in Go — client-go
+module: M5
+tags: [go, client-go, development]
+
+cards:
+  - id: m5-in-vs-out-of-cluster
+    q: |
+      How does a Go program get credentials for the Kubernetes API, in-cluster
+      vs on your laptop?
+    a: |
+      In-cluster: `rest.InClusterConfig()` reads the projected ServiceAccount
+      token and CA from `/var/run/secrets/kubernetes.io/serviceaccount/`.
+
+      Out-of-cluster: `clientcmd.BuildConfigFromFlags("", kubeconfigPath)`.
+
+      The standard idiom is to try in-cluster first and fall back to kubeconfig,
+      so the same binary runs in both places.
+    ecs: |
+      The AWS SDK's credential chain — instance/task role in production,
+      `~/.aws/credentials` locally. Same pattern, same reason.
+    tags: [client-go, config, auth]
+
+  - id: m5-clientset
+    q: |
+      What is a clientset?
+    a: |
+      The generated, typed client for built-in API groups:
+
+          clientset.AppsV1().Deployments(ns).Get(ctx, name, metav1.GetOptions{})
+
+      Typed structs, compile-time checking. `kubernetes.NewForConfig(cfg)` builds
+      one from a rest.Config.
+    tags: [client-go, api]
+
+  - id: m5-typed-vs-dynamic
+    q: |
+      When do you need the dynamic client instead of a clientset?
+    a: |
+      When the type isn't known at compile time — arbitrary CRDs, generic
+      tooling. It works in `unstructured.Unstructured` (map-backed) addressed by
+      GVR.
+
+      Typed for anything you own; dynamic when you must handle types you can't
+      import.
+    tags: [client-go, dynamic, crd]
+
+  - id: m5-gvk-vs-gvr
+    q: |
+      GVK vs GVR — what's the difference?
+    a: |
+      **GVK** = Group/Version/**Kind** — the type as written in YAML
+      (`apps/v1`, `Deployment`).
+
+      **GVR** = Group/Version/**Resource** — the REST path segment, lowercase
+      plural (`apps/v1`, `deployments`).
+
+      A **RESTMapper** converts between them. The dynamic client wants a GVR.
+    tags: [client-go, api, acronym]
+
+  - id: m5-why-not-poll
+    q: |
+      Why is calling `Get()` on every HTTP request a design flaw?
+    a: |
+      Every request becomes an API server round trip. At scale that's a
+      self-inflicted DoS on the control plane — the one component the whole
+      cluster shares — plus latency you didn't need.
+
+      The fix is a **watch-backed cache**: sync once, then stay current from a
+      stream of changes.
+    ecs: |
+      You'd feel this in ECS as API throttling from polling `DescribeServices`
+      in a hot path. Here the blast radius is bigger: you degrade the cluster,
+      not just yourself.
+    tags: [client-go, informer, performance, capstone]
+
+  - id: m5-watch
+    q: |
+      What is a watch, mechanically?
+    a: |
+      A long-lived streaming HTTP request to the API server that emits
+      ADDED/MODIFIED/DELETED events from a given `resourceVersion` onward.
+
+      Watches expire and break routinely — production code never uses a raw
+      watch directly; it uses an informer, which handles re-establishing and
+      re-listing.
+    tags: [client-go, watch]
+
+  - id: m5-informer
+    q: |
+      What does an informer actually give you?
+    a: |
+      1. An initial LIST to populate a local **store** (cache)
+      2. A WATCH to keep that store current
+      3. Event handlers (OnAdd/OnUpdate/OnDelete)
+      4. Automatic recovery when the watch drops
+
+      Reads then come from local memory at zero API cost.
+    ecs: |
+      **No ECS equivalent.** ECS clients are one-shot request/response. A
+      long-running process maintaining a live mirror of remote state is a
+      genuinely different operating model — this is the M5 mental shift.
+    tags: [client-go, informer, no-ecs-equivalent]
+
+  - id: m5-lister
+    q: |
+      What is a lister?
+    a: |
+      The read API over an informer's cache:
+
+          deploy, err := lister.Deployments(ns).Get(name)
+
+      Same shape as a clientset call, but served from memory with no API
+      traffic. **Never mutate what a lister returns** — it's a pointer into the
+      shared cache. `DeepCopy()` first.
+    tags: [client-go, informer, gotcha]
+
+  - id: m5-shared-informer-factory
+    q: |
+      Why use a SharedInformerFactory?
+    a: |
+      It ensures one informer (one watch, one cache) per type, shared by all
+      consumers. Ten controllers watching Pods still open one watch.
+
+          f := informers.NewSharedInformerFactory(clientset, 10*time.Minute)
+          f.Start(ctx.Done())
+          f.WaitForCacheSync(ctx.Done())
+    tags: [client-go, informer]
+
+  - id: m5-wait-for-cache-sync
+    q: |
+      What breaks if you skip `WaitForCacheSync`?
+    a: |
+      You serve reads from a cache that hasn't finished its initial LIST — an
+      empty or partial view that looks like "the object doesn't exist."
+
+      For a controller that means reconciling against a phantom empty cluster.
+      Always block on sync before serving or reconciling.
+    tags: [client-go, informer, gotcha, production-realism]
+
+  - id: m5-resync-not-relist
+    q: |
+      What does the informer's resync period actually do?
+    a: |
+      It replays the **cached** objects through your update handlers on an
+      interval. It does **not** re-fetch from the API server — the cache is
+      already correct via the watch.
+
+      It's a safety net for handlers that dropped work, not a consistency
+      mechanism.
+    tags: [client-go, informer, gotcha]
+
+  - id: m5-stale-cache-tradeoff
+    q: |
+      What's the correctness trade-off of reading from an informer cache?
+    a: |
+      It's eventually consistent — you may read state a moment out of date.
+
+      Fine for reads and for reconciliation (which re-runs anyway). Not fine for
+      read-modify-write on a resource where you need the current
+      `resourceVersion` — do those against the API server, and let conflict
+      detection catch you.
+    tags: [client-go, informer, consistency]
+
+  - id: m5-resourceversion-conflict
+    q: |
+      What is a 409 Conflict on update, and what's the correct response?
+    a: |
+      Kubernetes uses optimistic concurrency on `metadata.resourceVersion`. If
+      the object changed since you read it, your update is rejected.
+
+      Correct response: re-fetch, re-apply your change, retry —
+      `retry.RetryOnConflict(retry.DefaultRetry, ...)`. Never blind-retry the
+      same stale payload.
+    tags: [client-go, concurrency, gotcha]
+
+  - id: m5-patch-vs-update
+    q: |
+      Update vs patch — when do you want each?
+    a: |
+      **Update** sends the whole object and requires a current resourceVersion,
+      so it can conflict.
+
+      **Patch** sends only a change (strategic-merge, JSON-merge, or JSON-patch)
+      and usually avoids conflicts — better when you own one field and other
+      controllers own others.
+    tags: [client-go, api]
+
+  - id: m5-server-side-apply
+    q: |
+      What problem does server-side apply solve?
+    a: |
+      Field ownership. The API server tracks which manager owns which field
+      (`managedFields`), so two controllers editing different fields of one
+      object stop clobbering each other — and removing a field from your applied
+      config actually deletes it.
+
+      It's the modern replacement for the client-side apply annotation.
+    tags: [client-go, api, ssa, acronym]
+
+  - id: m5-workqueue
+    q: |
+      Why do controllers put keys on a workqueue instead of doing work in the
+      event handler?
+    a: |
+      The queue gives deduplication (many events for one object collapse to one
+      key), rate limiting, and exponential backoff on retry.
+
+      It also keeps handlers fast and non-blocking — a slow handler stalls the
+      shared informer for every consumer.
+    tags: [client-go, controller, workqueue]
+
+  - id: m5-namespace-key
+    q: |
+      What is the "key" a controller enqueues?
+    a: |
+      `namespace/name` (or just `name` for cluster-scoped), from
+      `cache.MetaNamespaceKeyFunc`, split back with
+      `cache.SplitMetaNamespaceKey`.
+
+      Deliberately not the object itself: by the time you process it the object
+      may have changed, so you re-read current state from the cache.
+    tags: [client-go, controller]
+
+  - id: m5-context-everywhere
+    q: |
+      Why does every client-go call take a `context.Context`?
+    a: |
+      Cancellation and timeouts. On SIGTERM you cancel the root context and
+      every in-flight API call unwinds, which is what makes graceful shutdown
+      work.
+
+      Never pass `context.TODO()` in a request path — a hung API call with no
+      deadline is an outage that looks like a hang.
+    tags: [go, client-go, production-realism]
+
+  - id: m5-rate-limiting-client
+    q: |
+      What client-side throttling does client-go apply by default?
+    a: |
+      A QPS/Burst rate limiter on the rest.Config (historically ~5 QPS / 10
+      burst). Exceed it and calls silently *queue*, showing up as mysterious
+      latency, often logged as "Waited for ... due to client-side throttling."
+
+      Raise it deliberately — or better, stop making so many calls (use an
+      informer).
+    tags: [client-go, performance, gotcha]
+
+  - id: m5-testing-fake-client
+    q: |
+      What are the options for testing Kubernetes code in Go?
+    a: |
+      - **fake clientset** (`k8s.io/client-go/kubernetes/fake`) — in-memory,
+        fast, unit-test scope. No real validation or defaulting.
+      - **envtest** — runs a real kube-apiserver + etcd binary locally; catches
+        validation, defaulting, and RBAC.
+      - **KIND** — a full cluster for true end-to-end.
+
+      The SRE challenge explicitly wants tests against a real cluster, not just
+      mocks.
+    tags: [testing, client-go, capstone]
+
+  - id: m5-healthcheck-real-connectivity
+    q: |
+      What makes a Kubernetes-aware health check meaningful rather than
+      decorative?
+    a: |
+      It must prove the API connection works — informer cache synced, or a
+      cheap real API call — not just that the HTTP server is listening.
+
+      "Process is up" is exactly the health check that stays green through an
+      outage. The challenge calls this out explicitly at Level 3.
+    tags: [health, capstone, production-realism]

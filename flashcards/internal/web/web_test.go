@@ -1,0 +1,223 @@
+package web_test
+
+import (
+	"net/http"
+	"net/http/httptest"
+	"path/filepath"
+	"strings"
+	"testing"
+	"testing/fstest"
+
+	flashcards "github.com/iadk/k8s-flashcards"
+	"github.com/iadk/k8s-flashcards/internal/deck"
+	"github.com/iadk/k8s-flashcards/internal/review"
+	"github.com/iadk/k8s-flashcards/internal/web"
+)
+
+const testDeck = `
+deck: Test deck
+module: M1
+tags: [testing]
+cards:
+  - id: card-one
+    q: |
+      What is a **Pod**?
+    a: |
+      The smallest deployable unit.
+    ecs: |
+      An ECS Task.
+    tags: [pod]
+  - id: card-two
+    q: |
+      What is a Service?
+    a: |
+      A stable virtual IP.
+    tags: [service]
+`
+
+func newServer(t *testing.T) http.Handler {
+	t.Helper()
+	lib, err := deck.Load(fstest.MapFS{"decks/test.yaml": {Data: []byte(testDeck)}}, "decks")
+	if err != nil {
+		t.Fatalf("loading test deck: %v", err)
+	}
+	store, err := review.Open(filepath.Join(t.TempDir(), "review.json"), 20)
+	if err != nil {
+		t.Fatal(err)
+	}
+	srv, err := web.New(lib, store)
+	if err != nil {
+		t.Fatalf("building server: %v", err)
+	}
+	return srv.Routes()
+}
+
+func do(t *testing.T, h http.Handler, method, target string) *httptest.ResponseRecorder {
+	t.Helper()
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, httptest.NewRequest(method, target, nil))
+	return rec
+}
+
+// Templates only fail at execution time, so rendering every page is the test
+// that catches a bad field reference.
+func TestPagesRender(t *testing.T) {
+	h := newServer(t)
+	for _, path := range []string{"/", "/drill", "/drill?module=M1", "/browse", "/browse?tag=pod"} {
+		t.Run(path, func(t *testing.T) {
+			rec := do(t, h, "GET", path)
+			if rec.Code != http.StatusOK {
+				t.Fatalf("GET %s = %d, body: %s", path, rec.Code, rec.Body)
+			}
+			if ct := rec.Header().Get("Content-Type"); !strings.HasPrefix(ct, "text/html") {
+				t.Errorf("Content-Type = %q", ct)
+			}
+		})
+	}
+}
+
+func TestDrillShowsQuestionButNotAnswer(t *testing.T) {
+	rec := do(t, newServer(t), "GET", "/drill")
+	body := rec.Body.String()
+
+	if !strings.Contains(body, "What is a") {
+		t.Error("drill page should show a question")
+	}
+	if strings.Contains(body, "smallest deployable unit") {
+		t.Error("drill page leaked the answer before reveal")
+	}
+	if !strings.Contains(body, "/reveal") {
+		t.Error("drill page should offer a reveal action")
+	}
+}
+
+func TestRevealReturnsAnswerAndEcsAnchor(t *testing.T) {
+	rec := do(t, newServer(t), "POST", "/drill/card-one/reveal")
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, body: %s", rec.Code, rec.Body)
+	}
+	body := rec.Body.String()
+
+	if !strings.Contains(body, "smallest deployable unit") {
+		t.Error("reveal should include the answer")
+	}
+	if !strings.Contains(body, "An ECS Task") {
+		t.Error("reveal should include the ECS anchor")
+	}
+	// Markdown should be rendered, not shown raw.
+	if strings.Contains(body, "**Pod**") {
+		t.Error("markdown was not rendered")
+	}
+	if !strings.Contains(body, "<strong>Pod</strong>") {
+		t.Error("expected bold markup in the rendered question")
+	}
+}
+
+func TestGradeAdvancesToNextCard(t *testing.T) {
+	h := newServer(t)
+	rec := do(t, h, "POST", "/drill/card-one/grade?g=3")
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, body: %s", rec.Code, rec.Body)
+	}
+	if !strings.Contains(rec.Body.String(), "card-two") {
+		t.Error("grading should advance to the next card in scope")
+	}
+}
+
+func TestGradeKeepsTheFilterScope(t *testing.T) {
+	h := newServer(t)
+	rec := do(t, h, "POST", "/drill/card-one/grade?g=3&tag=service")
+	body := rec.Body.String()
+	if !strings.Contains(body, "tag=service") {
+		t.Error("the drill scope should survive into the next fragment's URLs")
+	}
+}
+
+func TestGradeRejectsBadInput(t *testing.T) {
+	h := newServer(t)
+	tests := []struct {
+		name, target string
+		want         int
+	}{
+		{"unknown card", "/drill/nope/grade?g=3", http.StatusNotFound},
+		{"grade too high", "/drill/card-one/grade?g=9", http.StatusBadRequest},
+		{"grade too low", "/drill/card-one/grade?g=0", http.StatusBadRequest},
+		{"grade missing", "/drill/card-one/grade", http.StatusBadRequest},
+		{"grade not a number", "/drill/card-one/grade?g=good", http.StatusBadRequest},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := do(t, h, "POST", tt.target).Code; got != tt.want {
+				t.Errorf("POST %s = %d, want %d", tt.target, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestRevealUnknownCardIs404(t *testing.T) {
+	if got := do(t, newServer(t), "POST", "/drill/nope/reveal").Code; got != http.StatusNotFound {
+		t.Errorf("status = %d, want 404", got)
+	}
+}
+
+func TestExhaustedScopeShowsDoneNotAnError(t *testing.T) {
+	h := newServer(t)
+	// One card in scope; grading it leaves nothing due.
+	rec := do(t, h, "POST", "/drill/card-two/grade?g=4&tag=service")
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, body: %s", rec.Code, rec.Body)
+	}
+	if !strings.Contains(rec.Body.String(), "Nothing due") {
+		t.Errorf("expected a done fragment, got: %s", rec.Body)
+	}
+}
+
+func TestHealthAndReadiness(t *testing.T) {
+	h := newServer(t)
+	for _, path := range []string{"/healthz", "/readyz"} {
+		rec := do(t, h, "GET", path)
+		if rec.Code != http.StatusOK {
+			t.Errorf("GET %s = %d, body: %s", path, rec.Code, rec.Body)
+		}
+	}
+	if body := do(t, h, "GET", "/readyz").Body.String(); !strings.Contains(body, "2 cards") {
+		t.Errorf("readiness should report what loaded, got %q", body)
+	}
+}
+
+func TestStaticAssetIsServedLocally(t *testing.T) {
+	rec := do(t, newServer(t), "GET", "/static/htmx.min.js")
+	if rec.Code != http.StatusOK {
+		t.Fatalf("htmx should be vendored and served locally, got %d", rec.Code)
+	}
+	if rec.Body.Len() < 1000 {
+		t.Errorf("htmx asset looks truncated: %d bytes", rec.Body.Len())
+	}
+}
+
+// The real decks must render through the real templates, not just the fixture.
+func TestRealDecksRenderEndToEnd(t *testing.T) {
+	lib, err := deck.Load(flashcards.Decks, "decks")
+	if err != nil {
+		t.Fatal(err)
+	}
+	store, err := review.Open(filepath.Join(t.TempDir(), "review.json"), 20)
+	if err != nil {
+		t.Fatal(err)
+	}
+	srv, err := web.New(lib, store)
+	if err != nil {
+		t.Fatal(err)
+	}
+	h := srv.Routes()
+
+	if rec := do(t, h, "GET", "/browse"); rec.Code != http.StatusOK {
+		t.Fatalf("browsing every real card failed: %d", rec.Code)
+	}
+	for _, c := range lib.Cards {
+		rec := do(t, h, "POST", "/drill/"+c.ID+"/reveal")
+		if rec.Code != http.StatusOK {
+			t.Fatalf("revealing %q = %d: %s", c.ID, rec.Code, rec.Body)
+		}
+	}
+}

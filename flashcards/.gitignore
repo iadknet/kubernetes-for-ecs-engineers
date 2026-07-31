@@ -1,0 +1,6 @@
+# Build output
+bin/
+
+# Review history is personal progress, not source. If you want it to follow you
+# between machines, remove this line — it's a small JSON file.
+data/

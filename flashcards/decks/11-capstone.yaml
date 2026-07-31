@@ -1,0 +1,172 @@
+deck: Capstone — the Teleport SRE challenge
+module: CAP
+tags: [capstone, interview]
+
+cards:
+  - id: cap-levels
+    q: |
+      Summarize the five levels of the SRE challenge.
+    a: |
+      1. HTTP API to **read** a Deployment's replica count + Dockerfile + tests
+      2. HTTP API to **set** it + integration tests against a real cluster
+      3. **List** Deployments, a real K8s-connectivity health check, **Helm
+         chart**, zero-downtime upgrades
+      4. **Watch-based cache** instead of per-request calls, **mTLS**,
+         `make`-driven workflow
+      5. **gRPC** instead of HTTP, a **CRD + controller**, production-grade Helm
+         packaging
+
+      Each level is a strict superset of the one before.
+    tags: [challenge, scope]
+
+  - id: cap-design-doc-first
+    q: |
+      What does the challenge want *before* code, and what should it cover?
+    a: |
+      A short RFD-style design doc, reviewed first: API structure, pod
+      lifecycle, TLS configuration, and developer workflow.
+
+      They're testing whether you can scope and communicate a design — arguably
+      weighted more than the code itself.
+    tags: [process, interview]
+
+  - id: cap-scope-discipline
+    q: |
+      What are the challenge's explicit non-goals, and why do they matter?
+    a: |
+      No shared cache, no multi-region/multi-AZ, no gold-plated config system.
+      Hardcode and leave `TODO:` comments showing you know what's missing.
+
+      They're testing scope judgment. Over-building reads as *worse*, not
+      better: cut scope, not quality.
+    tags: [process, scope, interview]
+
+  - id: cap-why-informer
+    q: |
+      What's the Level 4 argument for replacing per-request API calls with an
+      informer cache?
+    a: |
+      Per-request calls make every user request an API server round trip —
+      latency you don't need and load on the component the whole cluster shares.
+
+      An informer LISTs once, WATCHes for changes, and serves reads from memory.
+      The trade-off to state out loud: eventual consistency.
+    tags: [client-go, performance, design]
+
+  - id: cap-health-check-bar
+    q: |
+      What makes the Level 3 health check non-trivial?
+    a: |
+      It must verify **actual Kubernetes API connectivity**, not just that the
+      process is listening. With an informer, "cache synced" is the honest
+      signal.
+
+      Split it: `/healthz` (am I wedged? — liveness) vs `/readyz` (can I serve? —
+      readiness). Putting the API check on liveness would restart every replica
+      during an API blip.
+    tags: [health, probes, design]
+
+  - id: cap-zero-downtime-helm
+    q: |
+      What does "helm upgrades must not cause unavailability" require?
+    a: |
+      Nothing from Helm itself — it's all in the Deployment spec:
+      readiness probes, `maxUnavailable: 0`, more than one replica, graceful
+      SIGTERM handling with a `preStop` delay, and a PDB.
+
+      Verify it: run a load generator through the upgrade and show zero failed
+      requests.
+    tags: [helm, availability, verification]
+
+  - id: cap-helm-l5-objects
+    q: |
+      Which objects does the Level 5 Helm chart need?
+    a: |
+      Deployment, Service, ServiceAccount, Role, RoleBinding — plus the CRD.
+
+      Note Role + RoleBinding rather than ClusterRole: least privilege is part
+      of the grade, and the app only needs Deployments in one namespace.
+    tags: [helm, rbac, packaging]
+
+  - id: cap-mtls-setup
+    q: |
+      What does mTLS require on both sides?
+    a: |
+      Server: cert + key, plus a client CA pool and
+      `ClientAuth: tls.RequireAndVerifyClientCert`.
+
+      Client: its own cert + key, plus the server CA.
+
+      In-cluster, certs come from a mounted Secret; production-grade would be
+      cert-manager or SPIFFE rather than hand-rolled certs.
+    tags: [security, tls, design]
+
+  - id: cap-grpc-vs-http
+    q: |
+      What changes when Level 5 moves the API from HTTP to gRPC?
+    a: |
+      A protobuf service definition and generated stubs; streaming becomes
+      available; errors become status codes.
+
+      Two operational consequences: health checking uses the **gRPC health
+      protocol** (Kubernetes supports `grpc:` probes natively), and L4 load
+      balancing pins connections — so a plain ClusterIP Service balances gRPC
+      badly.
+    tags: [grpc, networking, design]
+
+  - id: cap-crd-controller-l5
+    q: |
+      What does Level 5's CRD + controller actually have to do?
+    a: |
+      Store a desired replica count in a custom resource, and reconcile the
+      target Deployment until it matches — reporting status back.
+
+      The point is that it keeps converging: edit the Deployment out of band and
+      the controller pulls it back. That's what makes it an operator rather than
+      a client.
+    tags: [crd, controller, design]
+
+  - id: cap-hpa-conflict
+    q: |
+      Your controller sets `replicas` on a Deployment. What if an HPA also
+      targets it?
+    a: |
+      They fight — each reverts the other, hot-looping the API server.
+
+      Worth raising unprompted in the design doc: it shows you understand that
+      controllers compose and that field ownership is a real design question.
+    tags: [design, conflict, interview]
+
+  - id: cap-unhappy-path-tests
+    q: |
+      What "unhappy path" tests does this challenge expect?
+    a: |
+      Deployment doesn't exist (404, not a panic), API server unreachable
+      (health check fails honestly), RBAC denies the call (403 surfaced
+      clearly), invalid replica count rejected, and update conflicts retried.
+
+      Happy-path-only tests are a common way to fail a take-home.
+    tags: [testing, interview]
+
+  - id: cap-make-driven
+    q: |
+      Why does Level 4 ask for a `make`-driven workflow?
+    a: |
+      One documented entry point for build, test, image, KIND deploy, and
+      teardown — so a reviewer runs `make` and it works on macOS and Linux
+      without tribal knowledge.
+
+      Reviewability is part of the deliverable.
+    tags: [tooling, interview]
+
+  - id: cap-ai-policy
+    q: |
+      What's the rule about AI on the real submission?
+    a: |
+      Teleport's challenge says not to outsource the thinking to AI. The
+      capstone in this program is a **rehearsal and portfolio piece**; the
+      actual interview submission has to be written by you.
+
+      Which is the real reason to drill this material rather than lean on
+      autocomplete.
+    tags: [process, interview]

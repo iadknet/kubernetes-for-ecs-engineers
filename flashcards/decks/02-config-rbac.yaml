@@ -1,0 +1,355 @@
+deck: Config, Secrets, Namespaces, RBAC
+module: M2
+tags: [config, security]
+
+cards:
+  - id: m2-configmap
+    q: |
+      What is a ConfigMap and what are the two ways to consume one?
+    a: |
+      A namespaced API object holding non-confidential key/value config.
+      Consume it either as **environment variables** (`envFrom` /
+      `valueFrom.configMapKeyRef`) or as a **mounted volume** of files.
+    ecs: |
+      **No direct ECS equivalent** — ECS puts config inline in the Task
+      Definition's `environment` block. Here config is a separate object with
+      its own lifecycle, which is more moving parts but lets you change config
+      without touching the workload manifest.
+    tags: [configmap]
+
+  - id: m2-configmap-env-vs-volume
+    q: |
+      Env var vs volume mount for a ConfigMap — which updates live?
+    a: |
+      **Volume mounts** update automatically (eventually — kubelet sync, up to
+      ~a minute), so an app that re-reads the file picks up changes.
+
+      **Env vars are frozen at container start.** Changing the ConfigMap does
+      nothing until the Pod restarts.
+    tags: [configmap, gotcha]
+
+  - id: m2-configmap-no-auto-restart
+    q: |
+      You edited a ConfigMap and nothing changed. Why?
+    a: |
+      Kubernetes does **not** restart Pods when a ConfigMap or Secret changes.
+      There is no automatic rollout.
+
+      Standard fixes: `kubectl rollout restart`, or hash the config into a Pod
+      template annotation (what Helm charts do via `checksum/config`) so the
+      template changes and triggers a normal rolling update.
+    ecs: |
+      In ECS, changing config means a new Task Definition revision, which
+      inherently forces a deployment. K8s decouples them, so you have to force
+      the restart yourself — a very common early bug.
+    tags: [configmap, secret, gotcha, production-realism]
+
+  - id: m2-secret-base64
+    q: |
+      How is a Secret different from a ConfigMap, security-wise?
+    a: |
+      Barely. Secret values are **base64-encoded, not encrypted** — anyone who
+      can read the object can decode it instantly.
+
+      What you actually get: it's a distinct RBAC target, kubelet keeps it in
+      tmpfs, and it's kept out of some logs. Encryption at rest requires
+      configuring an EncryptionConfiguration (or a KMS provider) on the cluster.
+    ecs: |
+      Weaker than what you're used to. An ECS Task Definition *references*
+      Secrets Manager/SSM and the value is fetched at launch — the secret never
+      lives in the task definition. A raw K8s Secret does hold the value.
+    tags: [secret, security, gotcha]
+
+  - id: m2-external-secrets
+    q: |
+      What's the production answer to "K8s Secrets aren't really secret"?
+    a: |
+      Keep the real value in an external store and sync or reference it:
+      - **External Secrets Operator** + AWS Secrets Manager / SSM
+      - **Sealed Secrets** (encrypted, safe to commit)
+      - **SOPS** (encrypted files in git)
+      - **Secrets Store CSI driver** (mount directly, never create a Secret)
+
+      Plus enable encryption at rest on the cluster.
+    ecs: |
+      All of these are re-creating what ECS gives you natively with
+      `secrets: [{ valueFrom: <secretsmanager-arn> }]`. This is a real gap you
+      close with add-ons, not a naming difference.
+    tags: [secret, security, production-realism, eks]
+
+  - id: m2-eso-flow
+    q: |
+      What does External Secrets Operator actually do?
+    a: |
+      It's a controller watching **ExternalSecret** custom resources. Each one
+      says "read this key from this external store and materialize it as a
+      Kubernetes Secret," and ESO keeps that Secret in sync on a refresh
+      interval.
+
+      So the manifest in git references a secret; only the operator ever holds
+      the value.
+    ecs: |
+      The moving-parts version of an ECS Task Definition's
+      `secrets: [{ valueFrom: <arn> }]`. ECS resolves the reference at launch;
+      here a controller continuously syncs it into a real Secret object.
+    tags: [secret, eso, vault, security]
+
+  - id: m2-eso-still-lands-in-etcd
+    q: |
+      With ESO in place, is the secret value still in etcd?
+    a: |
+      **Yes.** ESO's output is an ordinary Kubernetes Secret, so the value lands
+      in etcd and `get secrets` still reveals it.
+
+      What you gained is source-of-truth, rotation, and audit outside the
+      cluster — not in-cluster confidentiality. For that you need encryption at
+      rest plus tight RBAC, or the **Secrets Store CSI driver**, which mounts
+      straight into the Pod and never creates a Secret at all.
+    tags: [secret, eso, security, gotcha]
+
+  - id: m2-secret-options-compared
+    q: |
+      Compare the four ways to keep real secrets out of git.
+    a: |
+      - **ESO + external store** (Vault, AWS Secrets Manager/SSM) — controller
+        syncs into a Secret. Central rotation; value still lands in etcd.
+      - **Secrets Store CSI driver** — mounted directly into the Pod; never
+        becomes a Secret object.
+      - **Sealed Secrets** — encrypted, safe to commit; only the in-cluster
+        controller can decrypt.
+      - **SOPS** — encrypted files in git, decrypted at deploy time.
+
+      Vault-vs-Secrets-Manager is a deployment detail; the *pattern* is the
+      portable part.
+    tags: [secret, security, portability]
+
+  - id: m2-vault-dynamic-secrets
+    q: |
+      What is a Vault **dynamic secret**, and why is it stronger than rotation?
+    a: |
+      Vault creates the credential on demand — a fresh database user per
+      workload, with a TTL — and revokes it when the lease expires.
+
+      There's no long-lived shared credential to rotate, leak, or forget, and
+      the blast radius of one is a single short-lived account. "The best secret
+      is no secret."
+    tags: [vault, secret, production-realism]
+
+  - id: m2-serviceaccount
+    q: |
+      What is a ServiceAccount?
+    a: |
+      An in-cluster identity for **Pods** (as opposed to humans). Every Pod runs
+      as one — `default` in its namespace if you don't specify.
+
+      It's the subject you attach RBAC to, and its token is what the Pod
+      presents to the API server.
+    ecs: |
+      An ECS **Task Role** — but note the direction: a Task Role grants *AWS*
+      permissions, while a ServiceAccount by default grants only *Kubernetes API*
+      permissions. Bridging to AWS IAM needs IRSA or EKS Pod Identity.
+    tags: [serviceaccount, rbac, identity]
+
+  - id: m2-default-sa-risk
+    q: |
+      Why should a workload not use the `default` ServiceAccount?
+    a: |
+      It's shared by everything in the namespace, so any permission you grant it
+      is granted to every Pod there — and it's the account an attacker lands on
+      after compromising any container.
+
+      Give each workload its own SA, and set
+      `automountServiceAccountToken: false` when the Pod never calls the API.
+    tags: [serviceaccount, security, production-realism]
+
+  - id: m2-rbac-four-objects
+    q: |
+      Name the four RBAC objects and how they pair up.
+    a: |
+      - **Role** — permissions *within one namespace*
+      - **ClusterRole** — permissions cluster-wide (or on cluster-scoped
+        resources)
+      - **RoleBinding** — grants a Role (or a ClusterRole) *in one namespace*
+      - **ClusterRoleBinding** — grants a ClusterRole *everywhere*
+
+      Roles define; Bindings attach to subjects (users, groups,
+      ServiceAccounts).
+    ecs: |
+      **No ECS equivalent** — ECS authorization is just IAM. RBAC is a second,
+      Kubernetes-native authorization system with its own vocabulary.
+    tags: [rbac, security]
+
+  - id: m2-clusterrole-in-rolebinding
+    q: |
+      What does a RoleBinding that references a **ClusterRole** mean?
+    a: |
+      Grant that ClusterRole's permissions, but scoped only to the
+      RoleBinding's namespace.
+
+      It's the standard way to reuse a common permission set (like `view`)
+      per-namespace without redefining it everywhere.
+    tags: [rbac, security]
+
+  - id: m2-rbac-additive
+    q: |
+      Can RBAC express "allow everything except X"?
+    a: |
+      No. RBAC is **purely additive** — there are no deny rules. Effective
+      permissions are the union of every binding for that subject.
+
+      To restrict, you grant less. To block something an existing binding
+      allows, you must remove or narrow that binding. (Admission webhooks/policy
+      engines are where "deny" lives.)
+    ecs: |
+      Unlike IAM, which you know has explicit `Deny` that overrides `Allow`.
+      This trips up nearly everyone arriving from AWS.
+    tags: [rbac, security, gotcha]
+
+  - id: m2-rbac-verbs
+    q: |
+      What are the common RBAC verbs, and which one is easy to forget?
+    a: |
+      `get`, `list`, `watch`, `create`, `update`, `patch`, `delete`,
+      `deletecollection`.
+
+      **`watch`** is the one people forget — an informer-based controller needs
+      `list` *and* `watch`, and fails at startup without both. `get` alone is
+      not enough.
+    tags: [rbac, verbs, client-go]
+
+  - id: m2-auth-can-i
+    q: |
+      How do you verify what a ServiceAccount can actually do?
+    a: |
+      ```
+      kubectl auth can-i list deployments \
+        --as=system:serviceaccount:flashcards:flashcards-sa \
+        -n flashcards
+
+      kubectl auth can-i --list --as=system:serviceaccount:...
+      ```
+
+      Test the permission, don't assume the YAML says what you meant.
+    tags: [rbac, kubectl, verification]
+
+  - id: m2-sa-token-projection
+    q: |
+      How does a Pod's ServiceAccount token get into the container, and what
+      changed in modern Kubernetes?
+    a: |
+      It's a **projected volume** at
+      `/var/run/secrets/kubernetes.io/serviceaccount/token`.
+
+      Modern clusters issue short-lived, audience-bound, auto-rotated tokens
+      instead of the old forever-valid Secret-based tokens. client-go picks the
+      file up automatically with `rest.InClusterConfig()`.
+    tags: [serviceaccount, security, client-go]
+
+  - id: m2-least-privilege-for-capstone
+    q: |
+      What's the minimum RBAC for a service that reads and scales Deployments?
+    a: |
+      A Role on `apps` / `deployments` with `get`, `list`, `watch` — plus
+      `patch` (or `update`) if it changes replica counts, and
+      `deployments/scale` if it uses the scale subresource.
+
+      Namespace-scoped Role, not ClusterRole, unless it genuinely must see the
+      whole cluster.
+    tags: [rbac, capstone, least-privilege]
+
+  - id: m2-resourcequota-limitrange
+    q: |
+      ResourceQuota vs LimitRange?
+    a: |
+      **ResourceQuota** caps aggregate consumption in a namespace (total CPU,
+      memory, object counts).
+
+      **LimitRange** sets per-Pod/per-container defaults, minimums, and maximums
+      — including injecting default requests/limits into Pods that omit them.
+
+      Quota governs the namespace; LimitRange governs each workload in it.
+    tags: [namespace, quota, multi-tenancy]
+
+  - id: m2-quota-forces-requests
+    q: |
+      What surprising thing happens once a ResourceQuota on CPU/memory exists?
+    a: |
+      Every Pod in that namespace **must** declare requests and limits — Pods
+      without them are rejected at admission.
+
+      A LimitRange with defaults is the usual companion so existing manifests
+      don't suddenly fail.
+    tags: [quota, gotcha, resources]
+
+  - id: m2-namespace-not-security-boundary
+    q: |
+      Is a Namespace a security boundary?
+    a: |
+      Only as far as you configure it. It scopes RBAC and quotas, but by default
+      gives **no network isolation** and no node isolation.
+
+      Hard multi-tenancy needs NetworkPolicies, quotas, and often separate node
+      pools — or separate clusters.
+    ecs: |
+      Where an ECS person would reach for separate clusters/accounts, K8s offers
+      a lighter boundary — which is convenient and easy to over-trust.
+    tags: [namespace, security, multi-tenancy]
+
+  - id: m2-irsa-vs-pod-identity
+    q: |
+      On EKS, how does a Pod get AWS IAM permissions?
+    a: |
+      Two mechanisms, both bridging ServiceAccount → IAM role:
+      - **IRSA** — OIDC provider trust; annotate the SA with the role ARN. The
+        widely deployed incumbent.
+      - **EKS Pod Identity** — newer, an agent + association API, no OIDC
+        wiring. The current default choice for new clusters.
+    ecs: |
+      Both are re-creating the ECS **Task Role**. Label this AWS-specific:
+      vanilla Kubernetes has no notion of AWS IAM at all.
+    tags: [eks, iam, serviceaccount, aws-specific]
+
+  - id: m2-eks-access-entries
+    q: |
+      On EKS, how do *humans* get access to the cluster, and why are there two
+      authorization systems?
+    a: |
+      **Access entries** (replacing the legacy `aws-auth` ConfigMap) map IAM
+      principals to Kubernetes users/groups.
+
+      IAM authenticates you to the API server; **Kubernetes RBAC** then decides
+      what you may do. Two stacked authz systems — an IAM admin is not
+      automatically a cluster admin.
+    ecs: |
+      No analog: ECS authorization is IAM, full stop. Expect this to come up in
+      interviews as "how does EKS auth work."
+    tags: [eks, rbac, iam, aws-specific]
+
+  - id: m2-immutable-configmaps
+    q: |
+      What does `immutable: true` on a ConfigMap or Secret buy you?
+    a: |
+      It blocks updates (you create a new object instead) and lets the kubelet
+      stop watching it — meaningfully less API server load in large clusters,
+      plus protection against accidental live edits.
+
+      Pairs naturally with hash-suffixed config object names.
+    tags: [configmap, secret, production-realism]
+
+  - id: m2-downward-api
+    q: |
+      What is the Downward API?
+    a: |
+      A way to expose Pod metadata to the container as env vars or files:
+      pod name, namespace, node name, labels, and the Pod's own resource
+      requests/limits.
+
+          valueFrom:
+            fieldRef:
+              fieldPath: metadata.namespace
+
+      Useful for logging context and for sizing runtimes to their own limits.
+    ecs: |
+      The ECS task metadata endpoint (`ECS_CONTAINER_METADATA_URI_V4`), but
+      injected as env/files rather than fetched over HTTP.
+    tags: [pod, metadata, config]

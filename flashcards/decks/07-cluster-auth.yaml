@@ -1,0 +1,231 @@
+deck: Cluster authentication — identity and credential lifetime
+module: M7
+tags: [auth, identity, security]
+
+cards:
+  - id: m7-authn-vs-authz
+    q: |
+      What are the two independent decisions the API server makes about a
+      request, and which Kubernetes objects govern each?
+    a: |
+      1. **Authentication** — who are you? Decided by an external mechanism:
+         client cert, ServiceAccount token, or OIDC. **No Kubernetes object is
+         involved.**
+      2. **Authorization** — may you do this? Decided by **RBAC** objects
+         (Role/ClusterRole + bindings).
+
+      They are separate systems that share only a username string.
+    ecs: |
+      In ECS, IAM is the whole story — one principal, one policy evaluation. The
+      stacking of two independent systems is the genuinely new idea, and it's
+      why an AWS account admin can still get `Forbidden` from an EKS cluster.
+    tags: [rbac, mental-model]
+
+  - id: m7-no-user-object
+    q: |
+      Why is there no `kubectl create user`?
+    a: |
+      **Kubernetes has no User object.** A username is just a string asserted
+      per request by the authentication layer and never stored anywhere.
+
+      So human identity always comes from outside the cluster — a cert signed by
+      the cluster CA, an OIDC provider, or (on EKS) an IAM principal. RBAC then
+      binds to that string.
+    ecs: |
+      **No ECS equivalent, and the absence is the lesson.** There's no directory
+      of cluster users to manage the way you'd manage IAM users.
+    tags: [identity, no-ecs-equivalent, gotcha]
+
+  - id: m7-x509-cn-o
+    q: |
+      In an X.509 client certificate, which fields become your Kubernetes
+      identity?
+    a: |
+      - **CN** (Common Name) → the **username**
+      - **O** (Organization), repeatable → the **groups**
+
+      That's the whole mapping. A cert with `CN=isaac, O=kubeadm:cluster-admins`
+      authenticates as user `isaac` in that group, and RBAC does the rest.
+    tags: [certs, identity]
+
+  - id: m7-kind-admin-credential
+    q: |
+      What credential does KIND put in your kubeconfig, and how does it get
+      cluster-admin?
+    a: |
+      A client certificate whose **O** is `kubeadm:cluster-admins`. kubeadm
+      pre-creates a ClusterRoleBinding granting that group `cluster-admin`.
+
+      So your access comes from a group in a cert, not from any user record.
+
+      ```
+      kubectl auth whoami
+      kubectl auth can-i --list
+      ```
+    tags: [certs, kind, rbac]
+
+  - id: m7-cert-revocation
+    q: |
+      Why does nobody use client certificates for humans in production?
+    a: |
+      They can't be revoked. Kubernetes does not check certificate revocation
+      lists — once issued, a cert is valid until it expires, and the only real
+      remedy is **rotating the cluster CA**, which invalidates everything.
+
+      Combine that with the long lifetimes people pick, and a leaked kubeconfig
+      is a standing cluster-admin credential.
+    tags: [certs, security, production-realism]
+
+  - id: m7-credential-lifetime
+    q: |
+      What's the through-line connecting client certs, TokenRequest, IRSA, and
+      CI credentials?
+    a: |
+      **Credential lifetime.** The direction of travel is away from long-lived,
+      unrevocable secrets toward short-lived, audience-scoped, auto-refreshed
+      tokens.
+
+      Same idea behind projected ServiceAccount tokens, IRSA/Pod Identity, and
+      OIDC federation for CI — a credential that expires in minutes barely
+      matters if it leaks.
+    tags: [security, mental-model, production-realism]
+
+  - id: m7-tokenrequest
+    q: |
+      How do you mint a ServiceAccount token today, and what changed from the
+      old way?
+    a: |
+      ```
+      kubectl create token my-sa --duration=10m
+      ```
+
+      The **TokenRequest API** issues a short-lived, audience-bound,
+      auto-rotated token. The legacy path — a permanent token stored in a Secret
+      — is no longer created automatically, because it never expired.
+    tags: [serviceaccount, tokens]
+
+  - id: m7-token-audience
+    q: |
+      What does binding a token to an **audience** protect against?
+    a: |
+      Token replay against a different service. A token minted for audience
+      `vault` is rejected by anything that validates for a different audience.
+
+      Without it, any component handed a Pod's token could turn around and use
+      it against the API server.
+    tags: [tokens, security]
+
+  - id: m7-tokenreview
+    q: |
+      What is the TokenReview API, and who uses it?
+    a: |
+      An API that asks the cluster "is this token valid, and who is it?" —
+      letting an *external* service verify a Kubernetes-issued token without
+      being the API server.
+
+      It's exactly how Vault's Kubernetes auth method validates a Pod's
+      ServiceAccount token before issuing a Vault token.
+    tags: [tokens, vault, integration]
+
+  - id: m7-vault-k8s-auth
+    q: |
+      Trace how a Pod gets a Vault token with no pre-shared secret.
+    a: |
+      1. Pod presents its projected ServiceAccount token to Vault.
+      2. Vault calls the cluster's **TokenReview** API to validate it.
+      3. Vault maps the resulting ServiceAccount identity to a Vault role.
+      4. Vault issues a short-lived Vault token.
+
+      No static credential is ever stored in the Pod — the Pod's *identity* is
+      the credential.
+    ecs: |
+      This is the self-hosted mirror of **IRSA / EKS Pod Identity**, which is
+      itself the mirror of an ECS **Task Role**. Same shape every time: prove
+      workload identity, receive a short-lived credential.
+    tags: [vault, serviceaccount, identity]
+
+  - id: m7-oidc-flow
+    q: |
+      How does OIDC authentication to the API server work?
+    a: |
+      The user authenticates to an external identity provider and gets an **ID
+      token** (a JWT). kubectl sends it as a bearer token. The API server
+      validates the signature against the provider's public keys and maps
+      claims → username and groups.
+
+      The cluster never stores the user, and never sees a password.
+    tags: [oidc, identity]
+
+  - id: m7-groups-claim
+    q: |
+      Why does an identity provider without a `groups` claim break RBAC's
+      design?
+    a: |
+      RBAC's scaling mechanism is binding roles to **groups**, not people. With
+      no groups claim (Google ID tokens, for one), you're forced into one
+      binding per user, which is unmanageable and drifts immediately.
+
+      The fix is a federator like **Dex** in front, which can attach group
+      claims.
+    tags: [oidc, rbac, production-realism]
+
+  - id: m7-structured-auth-config
+    q: |
+      What replaced the `--oidc-*` API server flags, and why is it better?
+    a: |
+      **Structured authentication configuration** — an `AuthenticationConfiguration`
+      file passed via `--authentication-config` (stable in v1.34).
+
+      It supports **multiple issuers**, **CEL** expressions for claim mapping and
+      validation, and is **reloadable without restarting the API server**. The
+      old flags still work and are the simpler starting point.
+    tags: [oidc, versioning]
+
+  - id: m7-exec-credential-plugin
+    q: |
+      What does a kubeconfig `exec` credential plugin do?
+    a: |
+      Instead of storing a credential, kubeconfig names a command that prints an
+      **ExecCredential** with a fresh token on demand — so kubectl always holds
+      a short-lived credential it can refresh.
+
+      Examples: `aws eks get-token`, `kubelogin` for OIDC, `gke-gcloud-auth-plugin`.
+    ecs: |
+      Structurally the same as the AWS CLI refreshing STS credentials from a
+      profile — the credential is fetched, not stored.
+    tags: [kubeconfig, tokens, tooling]
+
+  - id: m7-system-masters
+    q: |
+      What is special — and dangerous — about the `system:masters` group?
+    a: |
+      The RBAC authorizer **short-circuits** for it: members are granted
+      everything, and that cannot be revoked by deleting bindings.
+
+      So a cert with `O=system:masters` is a permanent, unrevocable superuser.
+      Break-glass only; never for day-to-day access.
+    tags: [rbac, security, gotcha]
+
+  - id: m7-anonymous-requests
+    q: |
+      What identity does an unauthenticated request get?
+    a: |
+      Username `system:anonymous`, group `system:unauthenticated` — a real
+      identity that RBAC can bind to.
+
+      That's why an over-broad ClusterRoleBinding to `system:unauthenticated`
+      exposes the cluster to anyone who can reach the API server.
+    tags: [security, rbac, gotcha]
+
+  - id: m7-break-glass
+    q: |
+      Why keep the certificate-based context after wiring up OIDC?
+    a: |
+      Because a misconfigured OIDC setup locks you out of your own API server,
+      and a self-hosted cluster has **no console fallback** the way AWS does.
+
+      The cert context is your break-glass path back in.
+    ecs: |
+      With ECS you always had the AWS console and IAM as a way back. Losing that
+      safety net is a real difference in self-hosted Kubernetes.
+    tags: [operations, production-realism, oidc]

@@ -1,0 +1,104 @@
+{{define "head"}}<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{{.}} · k8s flashcards</title>
+<script src="/static/htmx.min.js"></script>
+<style>
+  :root {
+    --bg: #fbfbfa; --fg: #1a1a19; --muted: #6b6b66; --line: #e2e1dd;
+    --card: #ffffff; --accent: #2f6f4e; --code-bg: #f2f1ed;
+    --again: #b3453a; --hard: #a8722a; --good: #2f6f4e; --easy: #3a6b9e;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #16161a; --fg: #e8e8e4; --muted: #9a9a94; --line: #2c2c32;
+      --card: #1e1e23; --accent: #7ec79b; --code-bg: #26262c;
+      --again: #e07a6f; --hard: #d9a55e; --good: #7ec79b; --easy: #7fa9d6;
+    }
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--bg); color: var(--fg);
+    font: 16px/1.6 ui-sans-serif, -apple-system, "Segoe UI", sans-serif;
+  }
+  .wrap { max-width: 48rem; margin: 0 auto; padding: 1.5rem 1.25rem 4rem; }
+  a { color: var(--accent); }
+  header { display: flex; align-items: baseline; gap: 1rem; flex-wrap: wrap;
+           border-bottom: 1px solid var(--line); padding-bottom: .75rem; margin-bottom: 1.5rem; }
+  header h1 { font-size: 1rem; margin: 0; font-weight: 600; letter-spacing: -.01em; }
+  header nav { margin-left: auto; display: flex; gap: 1rem; font-size: .875rem; }
+  .muted { color: var(--muted); }
+  .small { font-size: .8125rem; }
+  code, pre { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: .875em; }
+  code { background: var(--code-bg); padding: .1em .35em; border-radius: 3px; }
+  pre { background: var(--code-bg); padding: .75rem 1rem; border-radius: 6px;
+        overflow-x: auto; line-height: 1.5; }
+  pre code { background: none; padding: 0; }
+
+  .card { background: var(--card); border: 1px solid var(--line); border-radius: 10px;
+          padding: 1.5rem; margin-bottom: 1rem; }
+  .card .meta { font-size: .75rem; color: var(--muted); text-transform: uppercase;
+                letter-spacing: .06em; margin-bottom: 1rem; }
+  .q { font-size: 1.125rem; }
+  .q > :first-child, .a > :first-child { margin-top: 0; }
+  .a { border-top: 1px solid var(--line); margin-top: 1.25rem; padding-top: 1.25rem; }
+  .ecs { border-left: 3px solid var(--accent); background: var(--code-bg);
+         padding: .75rem 1rem; border-radius: 0 6px 6px 0; margin-top: 1.25rem; }
+  .ecs h4 { margin: 0 0 .35rem; font-size: .6875rem; text-transform: uppercase;
+            letter-spacing: .08em; color: var(--muted); }
+  .ecs > :last-child { margin-bottom: 0; }
+  .tags { margin-top: 1.25rem; display: flex; gap: .4rem; flex-wrap: wrap; }
+  .tags a { font-size: .75rem; color: var(--muted); background: var(--code-bg);
+            padding: .15rem .5rem; border-radius: 999px; text-decoration: none; }
+
+  button { font: inherit; cursor: pointer; border-radius: 6px; border: 1px solid var(--line);
+           background: var(--card); color: var(--fg); padding: .55rem 1.1rem; }
+  button:hover { border-color: var(--accent); }
+  .grades { display: flex; gap: .5rem; flex-wrap: wrap; margin-top: 1.25rem; }
+  .grades button { flex: 1 1 6rem; border-width: 1px; font-size: .9375rem; }
+  .grades button b { display: block; font-size: .6875rem; font-weight: 500;
+                     color: var(--muted); margin-top: .15rem; }
+  .g1 { color: var(--again); } .g2 { color: var(--hard); }
+  .g3 { color: var(--good); }  .g4 { color: var(--easy); }
+  .g1:hover { border-color: var(--again); } .g2:hover { border-color: var(--hard); }
+  .g3:hover { border-color: var(--good); }  .g4:hover { border-color: var(--easy); }
+
+  table { border-collapse: collapse; width: 100%; font-size: .9375rem; }
+  th, td { text-align: left; padding: .5rem .5rem .5rem 0; border-bottom: 1px solid var(--line); }
+  th { font-size: .75rem; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); font-weight: 500; }
+  td.num, th.num { text-align: right; padding-right: 1rem; font-variant-numeric: tabular-nums; }
+  .pill { display: inline-block; font-size: .75rem; padding: .1rem .45rem; border-radius: 4px;
+          background: var(--code-bg); color: var(--muted); }
+  .statline { display: flex; gap: 1.5rem; flex-wrap: wrap; margin-bottom: 1.5rem; }
+  .statline div { font-size: .8125rem; color: var(--muted); }
+  .statline b { display: block; font-size: 1.5rem; color: var(--fg); font-weight: 600;
+                font-variant-numeric: tabular-nums; }
+</style>
+</head>
+<body><div class="wrap">
+<header>
+  <h1><a href="/" style="text-decoration:none;color:inherit">Kubernetes flashcards</a></h1>
+  <nav>
+    <a href="/drill">drill</a>
+    <a href="/browse">browse</a>
+  </nav>
+</header>
+{{end}}
+
+{{define "foot"}}
+</div>
+<script>
+  // Keyboard drilling: space/enter reveals, 1-4 grades.
+  document.addEventListener('keydown', function (e) {
+    if (e.target.matches('input, textarea')) return;
+    var key = e.key === ' ' ? 'reveal' : e.key;
+    var el = document.querySelector('[data-key="' + key + '"]')
+          || (e.key === 'Enter' ? document.querySelector('[data-key="reveal"]') : null);
+    if (el) { e.preventDefault(); el.click(); }
+  });
+</script>
+</body>
+</html>
+{{end}}

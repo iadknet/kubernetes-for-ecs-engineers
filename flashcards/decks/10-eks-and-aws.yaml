@@ -1,0 +1,216 @@
+deck: EKS and AWS — what changes vs portable Kubernetes
+tags: [eks, aws-specific]
+
+cards:
+  - id: eks-what-aws-manages
+    q: |
+      What does EKS actually manage for you, and what is newly your job?
+    a: |
+      **AWS runs:** the API server, etcd, scheduler, and controller-manager,
+      across AZs. You never touch a control-plane node.
+
+      **Newly yours:** node groups (unless Auto Mode/Fargate), the CNI and its
+      IP math, IAM↔RBAC bridging, load balancer controllers, storage drivers,
+      observability add-ons, and version upgrades.
+    ecs: |
+      EKS is to self-managed Kubernetes roughly what ECS/Fargate is to a
+      self-managed Docker host — but AWS takes over **fewer** layers than
+      Fargate did. The seams are where the work lives.
+    tags: [managed, architecture]
+
+  - id: eks-vpc-cni-ip-exhaustion
+    q: |
+      Why can an EKS cluster run out of Pod capacity while nodes look idle?
+    a: |
+      The AWS VPC CNI gives every Pod a **real VPC IP** from your subnets.
+      Pod density per node is capped by the instance type's ENI/IP limits, and
+      the cluster is capped by subnet size.
+
+      You size subnets for Pod count, not node count. Symptom: Pods stuck
+      Pending with no IPs available.
+    ecs: |
+      Same model as ECS `awsvpc` per-task ENIs — but the exhaustion failure is
+      sharper here because Pod counts are much higher than task counts.
+    tags: [networking, cni, capacity, gotcha]
+
+  - id: eks-prefix-delegation
+    q: |
+      What's the standard fix for VPC CNI IP density limits?
+    a: |
+      **Prefix delegation** — assign each ENI a /28 prefix instead of individual
+      secondary IPs, multiplying Pods per node substantially.
+
+      Alternatives: larger instance types, or custom networking with a secondary
+      CIDR for Pods.
+    tags: [networking, cni, capacity]
+
+  - id: eks-irsa-vs-pod-identity
+    q: |
+      IRSA vs EKS Pod Identity — what's the practical difference?
+    a: |
+      **IRSA** — per-cluster OIDC provider; annotate the ServiceAccount with a
+      role ARN; the role's trust policy must reference that OIDC provider and
+      subject. Widely deployed, fiddly to set up.
+
+      **Pod Identity** — an add-on agent plus an association API; no OIDC
+      provider, no annotation, roles reusable across clusters. The current
+      default for new clusters.
+    ecs: |
+      Both re-create the ECS **Task Role**. Vanilla Kubernetes has no concept of
+      AWS IAM — this bridge is entirely AWS-specific.
+    tags: [iam, identity]
+
+  - id: eks-two-authz-systems
+    q: |
+      Why can an AWS account admin get `Forbidden` from an EKS cluster?
+    a: |
+      IAM only gets you **authenticated** to the API server. **Kubernetes RBAC**
+      then decides what you can do — and it doesn't know or care about your IAM
+      policies.
+
+      Access entries (or the legacy `aws-auth` ConfigMap) map the IAM principal
+      to K8s users/groups. Two stacked authorization systems.
+    tags: [iam, rbac, gotcha]
+
+  - id: eks-cluster-creator-admin
+    q: |
+      Why could the person who created the cluster get in, but nobody else?
+    a: |
+      The creating IAM principal is implicitly granted cluster-admin. Everyone
+      else needs an explicit access entry.
+
+      Classic day-two incident: the cluster was created by a CI role or a
+      departed employee, and no human is mapped.
+    tags: [iam, rbac, incident]
+
+  - id: eks-lb-controller
+    q: |
+      What does the AWS Load Balancer Controller create for an Ingress vs a
+      Service?
+    a: |
+      `Ingress` → an **ALB** (L7 path/host routing).
+      `Service type=LoadBalancer` with the right annotations → an **NLB** (L4).
+
+      Without the controller installed, both objects sit there doing nothing.
+      Most real configuration lives in annotations.
+    ecs: |
+      The closest one-to-one mapping in the whole model: ECS Service → target
+      group → ALB becomes Ingress → Service → ALB.
+    tags: [networking, ingress, loadbalancer]
+
+  - id: eks-target-type-ip
+    q: |
+      What does the ALB annotation `target-type: ip` change?
+    a: |
+      Traffic goes **directly to Pod IPs** instead of to a NodePort on each
+      node — removing an extra network hop and preserving the client source IP.
+
+      It's the default choice with the VPC CNI, and required for Fargate Pods.
+    tags: [networking, loadbalancer]
+
+  - id: eks-fargate-limits
+    q: |
+      What are the real constraints of EKS Fargate profiles?
+    a: |
+      No DaemonSets, no privileged containers, no host networking or hostPath,
+      one Pod per micro-VM with sizing rounded to fixed shapes, slower Pod
+      start, and no GPU.
+
+      The DaemonSet limitation is the big one: your log shipper and node agents
+      have to become sidecars.
+    ecs: |
+      It *is* Fargate, with the same trade-offs you know — but Kubernetes leans
+      on DaemonSets far more than ECS does, so their absence hurts more.
+    tags: [fargate, compute]
+
+  - id: eks-auto-mode
+    q: |
+      What is EKS Auto Mode?
+    a: |
+      AWS manages nodes *and* core add-ons (compute autoscaling, load balancing,
+      storage, networking) for you — the most "Fargate-like" way to run a whole
+      cluster.
+
+      Least operational surface, least control, highest per-hour cost.
+    tags: [compute, managed]
+
+  - id: eks-karpenter
+    q: |
+      What is Karpenter, and what should a workload engineer know about it?
+    a: |
+      A node autoscaler that watches for **unschedulable Pods** and provisions
+      right-sized instances directly (no ASG indirection), consolidating and
+      replacing nodes as demand changes.
+
+      Workload-side takeaway: nodes appear and disappear constantly, so PDBs,
+      graceful shutdown, and `do-not-disrupt` annotations are what keep your
+      service stable. Operating it is platform-team territory.
+    ecs: |
+      ECS Capacity Providers with managed scaling — but far more aggressive
+      about replacing and consolidating nodes under you.
+    tags: [autoscaling, nodes, platform]
+
+  - id: eks-ebs-single-az
+    q: |
+      What's the classic multi-AZ storage gotcha on EKS?
+    a: |
+      EBS volumes are single-AZ and ReadWriteOnce. A Pod bound to an EBS PVC can
+      only be scheduled in that volume's AZ — no capacity there means Pending,
+      regardless of free capacity elsewhere.
+
+      Use `volumeBindingMode: WaitForFirstConsumer` so the volume is created
+      where the Pod lands, or EFS for cross-AZ.
+    tags: [storage, multi-az, gotcha]
+
+  - id: eks-addons
+    q: |
+      What are EKS "managed add-ons" and which are typical?
+    a: |
+      AWS-packaged versions of cluster components it will install and upgrade
+      for you: VPC CNI, CoreDNS, kube-proxy, EBS/EFS CSI drivers, Pod Identity
+      agent.
+
+      They still have versions that must stay compatible with the cluster
+      version — add-on drift is a real upgrade failure mode.
+    tags: [addons, upgrades]
+
+  - id: eks-version-support
+    q: |
+      What's the cadence pressure on EKS cluster versions?
+    a: |
+      Kubernetes ships ~3 minor releases a year and AWS supports each version
+      for a limited window before extended-support charges and eventual forced
+      upgrade.
+
+      So upgrades are a recurring, scheduled reality — not a one-off project.
+    tags: [upgrades, operations]
+
+  - id: eks-upgrade-workload-impact
+    q: |
+      A cluster upgrade is happening and you own workloads, not the platform.
+      What do you actually own?
+    a: |
+      1. **Deprecated APIs** — manifests on removed API versions break. Check
+         with `kubectl-convert` / `pluto` before the bump.
+      2. **Surviving the node roll** — every node is drained and replaced, so
+         PDBs, readiness probes, graceful shutdown, and >1 replica decide
+         whether users notice.
+    ecs: |
+      An ECS capacity-provider instance refresh, but cluster-wide and on a
+      schedule you don't control.
+    tags: [upgrades, availability, production-realism]
+
+  - id: eks-portable-vs-aws
+    q: |
+      Which Kubernetes skills transfer to GKE/AKS unchanged, and which are
+      AWS-only?
+    a: |
+      **Portable:** all workload-layer objects — Deployments, Services, Ingress,
+      RBAC, NetworkPolicy, probes, resources, HPA, PDB, Helm, CRDs, client-go.
+
+      **AWS-only:** IRSA/Pod Identity, access entries, VPC CNI IP math, ALB
+      controller annotations, EBS/EFS CSI specifics, Karpenter, Auto Mode.
+
+      The portable set is the career-durable part; keep the two mentally
+      separate in interviews.
+    tags: [portability, career]

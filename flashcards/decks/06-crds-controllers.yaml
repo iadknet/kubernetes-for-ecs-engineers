@@ -1,0 +1,277 @@
+deck: CRDs and controllers — the operator pattern
+module: M6
+tags: [crd, operator, development]
+
+cards:
+  - id: m6-crd-vs-cr
+    q: |
+      CRD vs CR — what's the difference?
+    a: |
+      A **CustomResourceDefinition** is the schema — it teaches the API server a
+      new type, after which `kubectl get <yourkind>` works.
+
+      A **Custom Resource** is an instance of that type.
+
+      Defining the CRD alone gets you a typed, validated, RBAC-able object
+      stored in etcd — with no behavior at all.
+    ecs: |
+      **No ECS equivalent whatsoever.** Don't look for one. Extending the
+      control plane's own API with your types is the thing Kubernetes has that
+      ECS structurally cannot.
+    tags: [crd, no-ecs-equivalent]
+
+  - id: m6-crd-without-controller
+    q: |
+      What does a CRD do without a controller?
+    a: |
+      Nothing but store data. It's a validated, versioned, RBAC-protected record
+      in etcd that no one acts on.
+
+      The CRD is the noun; the **controller** is the verb. An operator is both
+      together.
+    tags: [crd, operator]
+
+  - id: m6-operator-pattern
+    q: |
+      Define the operator pattern in one sentence.
+    a: |
+      Encode the operational knowledge a human would apply — install, upgrade,
+      back up, fail over — as a controller that continuously reconciles a custom
+      resource describing desired state.
+
+      "A human operator's runbook, as a reconciliation loop."
+    tags: [operator, pattern]
+
+  - id: m6-reconcile-signature
+    q: |
+      What does a controller-runtime `Reconcile` receive, and what does it
+      notably *not* receive?
+    a: |
+      ```
+      func (r *Reconciler) Reconcile(ctx context.Context,
+          req ctrl.Request) (ctrl.Result, error)
+      ```
+
+      `req` is only a **namespace/name**. There's no event, no "what changed,"
+      no old-vs-new diff.
+
+      That's deliberate: you re-read current state and drive toward desired
+      state, so the same code handles create, update, resync, and restart.
+    tags: [controller-runtime, reconcile]
+
+  - id: m6-level-vs-edge
+    q: |
+      What does "level-triggered, not edge-triggered" mean here?
+    a: |
+      Edge-triggered = react to the transition (an event). Level-triggered =
+      look at the current level and correct it.
+
+      Kubernetes controllers are level-triggered, which is why a missed event
+      isn't fatal: the next reconcile observes reality and fixes it. It's what
+      makes the system self-healing rather than fragile.
+    tags: [reconcile, mental-model]
+
+  - id: m6-idempotent-reconcile
+    q: |
+      Why must Reconcile be idempotent?
+    a: |
+      It will be called repeatedly for the same object — on resync, on unrelated
+      updates, after restarts, after conflicts.
+
+      "Create a thing" must mean "ensure exactly one thing exists." A reconcile
+      that appends or increments on every call corrupts state fast.
+    tags: [reconcile, correctness, production-realism]
+
+  - id: m6-requeue
+    q: |
+      What are the ways a reconcile asks to be called again?
+    a: |
+      ```
+      return ctrl.Result{}, nil                        // done
+      return ctrl.Result{}, err                        // retry, backoff
+      return ctrl.Result{RequeueAfter: 30*time.Second}, nil
+      ```
+
+      Returning an error requeues with **exponential backoff** — the right
+      choice for transient failures. Use `RequeueAfter` for polling something
+      that isn't watchable.
+    tags: [reconcile, controller-runtime]
+
+  - id: m6-spec-vs-status
+    q: |
+      Who writes `spec` and who writes `status`?
+    a: |
+      **Users write spec** (desired state). **Controllers write status**
+      (observed state). A controller writing its own spec is usually a bug —
+      it's arguing with the user.
+
+      With the `status` subresource enabled, they're separate endpoints, so a
+      status write can't accidentally modify spec.
+    tags: [status, api, correctness]
+
+  - id: m6-status-conditions
+    q: |
+      What's the convention for `status.conditions`?
+    a: |
+      A list of typed conditions, each with `type`, `status`
+      (True/False/Unknown), `reason`, `message`, `lastTransitionTime`.
+
+      Standard types: `Ready`, `Available`, `Progressing`. Unknown is meaningful
+      — "I haven't observed this yet" is different from "it's false."
+    tags: [status, api, conventions]
+
+  - id: m6-observed-generation
+    q: |
+      What is `status.observedGeneration` for?
+    a: |
+      `metadata.generation` increments on every spec change. Recording the
+      generation you last reconciled lets anyone tell whether the status
+      reflects the **current** spec or a stale one.
+
+      Without it, "Ready: True" might describe the previous spec.
+    tags: [status, api, gotcha]
+
+  - id: m6-owner-references
+    q: |
+      What do owner references give you?
+    a: |
+      1. **Garbage collection** — delete the owner and Kubernetes cascades to
+         the children automatically.
+      2. **Event mapping** — controller-runtime's `Owns()` maps a child's events
+         back to the owner's reconcile.
+
+      `ctrl.SetControllerReference(cr, deploy, r.Scheme)` sets it.
+    tags: [ownership, garbage-collection, controller-runtime]
+
+  - id: m6-finalizers
+    q: |
+      What is a finalizer and how does deletion actually work with one?
+    a: |
+      A string in `metadata.finalizers`. While it's present, `DELETE` only sets
+      `deletionTimestamp` — the object is **not** removed.
+
+      The controller sees the timestamp, performs external cleanup, then removes
+      its finalizer, and only then does the object disappear.
+    ecs: |
+      No equivalent — ECS deletes are immediate. This is how you clean up
+      *outside* the cluster (an S3 bucket, a DNS record) before the record of it
+      vanishes.
+    tags: [finalizers, deletion, no-ecs-equivalent]
+
+  - id: m6-stuck-finalizer
+    q: |
+      Why is a namespace or object stuck "Terminating" forever?
+    a: |
+      A finalizer nobody will remove — usually its controller is gone or
+      crashing.
+
+      The blunt fix is patching `metadata.finalizers` to empty, which skips the
+      cleanup the finalizer existed to perform. Know why it's stuck before you
+      do that.
+    tags: [finalizers, debugging, incident]
+
+  - id: m6-manager
+    q: |
+      What does the controller-runtime **Manager** own?
+    a: |
+      Shared plumbing: the client and its cache (informers), scheme, leader
+      election, health/readiness probe endpoints, the metrics server, and
+      lifecycle for every controller it runs.
+
+      You register controllers with it and call `mgr.Start(ctx)` once.
+    tags: [controller-runtime, manager]
+
+  - id: m6-scheme
+    q: |
+      What is the Scheme and what happens if you forget to register your types?
+    a: |
+      The registry mapping Go types ↔ GVKs, used for encoding, decoding, and
+      the typed client.
+
+      Forget `AddToScheme` and you get `no kind is registered for the type` at
+      runtime — a very common first-run error with a new CRD.
+    tags: [controller-runtime, scheme, gotcha]
+
+  - id: m6-leader-election
+    q: |
+      Why do controllers use leader election?
+    a: |
+      Multiple replicas exist for availability, but only **one** may reconcile —
+      two controllers acting on the same object fight, duplicate work, and
+      thrash.
+
+      Standby replicas hold a Lease and take over on failure. Active/passive HA,
+      not active/active.
+    tags: [controller-runtime, ha, correctness]
+
+  - id: m6-admission-webhooks
+    q: |
+      Mutating vs validating admission webhooks — order and purpose?
+    a: |
+      **Mutating** runs first and may change the object (inject sidecars, set
+      defaults). **Validating** runs after and may only accept or reject.
+
+      This is where "deny" logic lives, since RBAC has none. Both sit in the
+      request path — a broken webhook can wedge all writes cluster-wide.
+    tags: [webhooks, admission, security]
+
+  - id: m6-crd-validation
+    q: |
+      Where does CRD field validation come from?
+    a: |
+      The **OpenAPI v3 schema** in the CRD (types, required fields, patterns,
+      min/max) — enforced by the API server with no code from you.
+
+      For rules a schema can't express, **CEL** validation rules
+      (`x-kubernetes-validations`) run in the API server too, replacing many
+      webhooks.
+    tags: [crd, validation, cel]
+
+  - id: m6-crd-versioning
+    q: |
+      How does a CRD serve multiple versions of a type?
+    a: |
+      Declare several versions with exactly one marked `storage: true` — that's
+      what's persisted in etcd. Others are served and converted on the fly,
+      either trivially (`None`) or via a **conversion webhook**.
+
+      This is how you evolve a CRD without breaking existing manifests.
+    tags: [crd, versioning, api]
+
+  - id: m6-kubebuilder-markers
+    q: |
+      What are kubebuilder markers?
+    a: |
+      Comments that generate real artifacts:
+
+          // +kubebuilder:validation:Minimum=1
+          // +kubebuilder:subresource:status
+          // +kubebuilder:printcolumn:name="Replicas",type=integer,JSONPath=".spec.replicas"
+          // +kubebuilder:rbac:groups=apps,resources=deployments,verbs=get;list;watch;patch
+
+      `make manifests` turns them into CRD YAML and RBAC rules — including the
+      Role your operator needs, derived from the code that uses it.
+    tags: [kubebuilder, codegen, rbac]
+
+  - id: m6-dont-fight-controllers
+    q: |
+      What happens when two controllers manage the same field?
+    a: |
+      They fight — each reverts the other, hot-looping the API server. Classic
+      case: your operator sets `replicas` while an HPA also owns it.
+
+      Avoid by owning distinct fields, using server-side apply field ownership,
+      or explicitly ceding the field (the HPA case: don't set replicas at all).
+    tags: [correctness, conflict, hpa, production-realism]
+
+  - id: m6-crd-vs-configmap
+    q: |
+      When is a CRD the right call over a ConfigMap?
+    a: |
+      Choose a CRD when you want a **typed, validated, RBAC-scoped, versioned**
+      object with status reporting that users manage with normal `kubectl` verbs
+      — i.e. a real API for your abstraction.
+
+      A ConfigMap is fine for opaque config nobody reconciles. Don't build an
+      operator when a Helm chart would do.
+    tags: [crd, design, scope]

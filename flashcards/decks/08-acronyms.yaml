@@ -1,0 +1,317 @@
+deck: Acronyms and vocabulary
+tags: [acronyms, vocabulary]
+
+cards:
+  - id: acr-k8s
+    q: |
+      K8s
+    a: |
+      **Kubernetes** — "k", 8 letters, "s". (Similarly i18n, o11y.)
+
+      Greek for helmsman/pilot; the ship's-wheel logo is the same joke.
+    tags: [naming]
+
+  - id: acr-cni
+    q: |
+      CNI
+    a: |
+      **Container Network Interface** — the plugin spec for Pod networking:
+      assign IPs, wire up cross-node routing, and (if implemented) enforce
+      NetworkPolicy.
+
+      Calico, Cilium, AWS VPC CNI.
+    tags: [networking]
+
+  - id: acr-cri
+    q: |
+      CRI
+    a: |
+      **Container Runtime Interface** — the gRPC API between the kubelet and the
+      container runtime (containerd, CRI-O).
+
+      The interface that let Kubernetes remove its hard-coded Docker support.
+    tags: [runtime]
+
+  - id: acr-csi
+    q: |
+      CSI
+    a: |
+      **Container Storage Interface** — the plugin spec for storage drivers, so
+      volume vendors ship out-of-tree.
+
+      `ebs-csi-driver`, `efs-csi-driver`.
+    tags: [storage]
+
+  - id: acr-crd-cr
+    q: |
+      CRD and CR
+    a: |
+      **CustomResourceDefinition** — the schema that teaches the API server a
+      new kind.
+
+      **Custom Resource** — one instance of that kind.
+    tags: [crd, api]
+
+  - id: acr-rbac
+    q: |
+      RBAC
+    a: |
+      **Role-Based Access Control** — Kubernetes' authorization system:
+      Role/ClusterRole (permissions) bound to subjects via
+      RoleBinding/ClusterRoleBinding.
+
+      Additive only; no deny rules.
+    tags: [security]
+
+  - id: acr-sa
+    q: |
+      SA (in a Kubernetes context)
+    a: |
+      **ServiceAccount** — the identity a Pod runs as, and the subject you bind
+      RBAC to. The ECS Task Role analog.
+    tags: [security, identity]
+
+  - id: acr-pv-pvc-sc
+    q: |
+      PV, PVC, SC
+    a: |
+      **PersistentVolume** — the actual storage.
+      **PersistentVolumeClaim** — the workload's request for storage.
+      **StorageClass** — the provisioner that creates PVs on demand.
+    tags: [storage]
+
+  - id: acr-rwo-rwx
+    q: |
+      RWO, ROX, RWX
+    a: |
+      Volume access modes: **ReadWriteOnce** (one node), **ReadOnlyMany**,
+      **ReadWriteMany** (many nodes).
+
+      EBS is RWO — the constraint behind the single-AZ scheduling gotcha. EFS is
+      RWX.
+    tags: [storage, aws-specific]
+
+  - id: acr-hpa-vpa
+    q: |
+      HPA and VPA
+    a: |
+      **HorizontalPodAutoscaler** — changes the *number* of Pods.
+      **VerticalPodAutoscaler** — changes each Pod's *requests/limits*.
+
+      Don't run both on the same metric.
+    tags: [autoscaling]
+
+  - id: acr-pdb
+    q: |
+      PDB
+    a: |
+      **PodDisruptionBudget** — the minimum availability that voluntary
+      disruptions (drains, upgrades) must respect.
+
+      No protection against involuntary disruption like node crashes.
+    tags: [availability]
+
+  - id: acr-qos
+    q: |
+      QoS classes
+    a: |
+      **Quality of Service** — Guaranteed (requests == limits), Burstable
+      (requests < limits), BestEffort (nothing set).
+
+      Determines eviction order under node pressure, worst first.
+    tags: [resources]
+
+  - id: acr-oom
+    q: |
+      OOMKilled
+    a: |
+      **Out Of Memory** — the kernel killed the container for exceeding its
+      memory limit. Exit code 137.
+
+      Memory is incompressible: over the limit means killed, not throttled.
+    tags: [resources, debugging]
+
+  - id: acr-gvk-gvr
+    q: |
+      GVK and GVR
+    a: |
+      **Group/Version/Kind** — the type as written in YAML (`apps/v1`,
+      `Deployment`).
+      **Group/Version/Resource** — the REST path segment (`apps/v1`,
+      `deployments`).
+
+      A RESTMapper converts between them.
+    tags: [api, client-go]
+
+  - id: acr-ssa
+    q: |
+      SSA
+    a: |
+      **Server-Side Apply** — the API server tracks per-field ownership in
+      `managedFields`, so multiple controllers can edit one object without
+      clobbering each other.
+    tags: [api, client-go]
+
+  - id: acr-crb-rb
+    q: |
+      RB and CRB
+    a: |
+      **RoleBinding** — grants a Role (or ClusterRole) within one namespace.
+      **ClusterRoleBinding** — grants a ClusterRole cluster-wide.
+    tags: [security]
+
+  - id: acr-sig-cncf
+    q: |
+      CNCF and SIG
+    a: |
+      **Cloud Native Computing Foundation** — the Linux Foundation body that
+      hosts Kubernetes, Prometheus, Envoy, etcd, and friends.
+
+      **Special Interest Group** — the working groups that own areas of
+      Kubernetes (SIG-Network, SIG-Auth); where KEPs originate.
+    tags: [ecosystem]
+
+  - id: acr-kep
+    q: |
+      KEP
+    a: |
+      **Kubernetes Enhancement Proposal** — the design doc process for changes
+      to Kubernetes, including the alpha → beta → GA graduation criteria.
+
+      Useful when you need to know *why* a feature behaves the way it does.
+    tags: [ecosystem]
+
+  - id: acr-oci
+    q: |
+      OCI
+    a: |
+      **Open Container Initiative** — the standards for container image format,
+      runtime, and distribution.
+
+      Why images built by Docker, Podman, Buildah, or ko all run anywhere.
+    tags: [containers, standards]
+
+  - id: acr-cel
+    q: |
+      CEL
+    a: |
+      **Common Expression Language** — the expression language used for
+      in-API-server validation rules on CRDs
+      (`x-kubernetes-validations`) and in admission policies.
+
+      Replaces many validating webhooks.
+    tags: [crd, validation]
+
+  - id: acr-mtls
+    q: |
+      mTLS
+    a: |
+      **Mutual TLS** — both sides present certificates, so the server
+      authenticates the client too.
+
+      Level 4 of the SRE challenge; also what service meshes give you for free
+      between Pods.
+    tags: [security, capstone]
+
+  - id: acr-sni-san
+    q: |
+      SNI and SAN
+    a: |
+      **Server Name Indication** — the hostname the client sends in the TLS
+      handshake, letting one IP serve many certs. It's how Ingress does
+      host-based TLS routing.
+
+      **Subject Alternative Name** — the hostnames/IPs a cert is actually valid
+      for. Modern clients ignore Common Name entirely.
+    tags: [security, tls, networking]
+
+  - id: acr-sli-slo-sla
+    q: |
+      SLI, SLO, SLA
+    a: |
+      **Indicator** — the measurement.
+      **Objective** — the internal target.
+      **Agreement** — the contractual promise, with financial consequences.
+
+      SLO < SLA, always, so you break the objective before the contract.
+    tags: [sre]
+
+  - id: acr-red-use
+    q: |
+      RED and USE
+    a: |
+      **Rate, Errors, Duration** — for request-driven services.
+      **Utilization, Saturation, Errors** — for resources.
+    tags: [sre, observability]
+
+  - id: acr-mttr-mtbf
+    q: |
+      MTTR and MTBF
+    a: |
+      **Mean Time To Recovery** and **Mean Time Between Failures**.
+
+      SRE practice optimizes MTTR hard — you can always shorten recovery, while
+      preventing all failure is a losing game.
+    tags: [sre, on-call]
+
+  - id: acr-irsa
+    q: |
+      IRSA
+    a: |
+      **IAM Roles for Service Accounts** — the EKS mechanism (OIDC-based)
+      letting a Pod assume an AWS IAM role via its ServiceAccount.
+
+      The ECS Task Role equivalent. EKS Pod Identity is the newer alternative.
+    tags: [eks, iam, aws-specific]
+
+  - id: acr-eks-gke-aks
+    q: |
+      EKS, GKE, AKS
+    a: |
+      Managed Kubernetes on AWS, Google Cloud, and Azure.
+
+      All three manage the control plane; the workload-layer skills are the
+      portable part and transfer directly between them.
+    tags: [managed, portability]
+
+  - id: acr-etcd
+    q: |
+      etcd
+    a: |
+      Not an acronym — from `/etc` + "d" (distributed). The consistent,
+      Raft-backed key-value store holding all cluster state.
+
+      The only thing in the cluster that truly must be backed up.
+    tags: [architecture, naming]
+
+  - id: acr-kubectl-pronounce
+    q: |
+      kubectl
+    a: |
+      "**cube-control**" (also heard: cube-cuddle, cube-C-T-L). "Kube control" is
+      the safest in an interview.
+
+      The CLI client for the Kubernetes API — your `aws ecs` equivalent.
+    tags: [tooling, naming]
+
+  - id: acr-gitops
+    q: |
+      GitOps
+    a: |
+      Git as the single source of truth for cluster state, with an in-cluster
+      agent (Argo CD, Flux) continuously reconciling the cluster toward the
+      repo.
+
+      The reconciliation loop applied to deployment itself — pull-based, so no
+      CI system needs cluster credentials.
+    tags: [cicd, deployment]
+
+  - id: acr-ttl
+    q: |
+      TTL (in Kubernetes contexts)
+    a: |
+      **Time To Live** — most often `ttlSecondsAfterFinished` on Jobs, which
+      auto-deletes completed Jobs and their Pods.
+
+      Without it, finished Jobs accumulate in etcd indefinitely.
+    tags: [job, cleanup]

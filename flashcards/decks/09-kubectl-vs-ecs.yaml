@@ -1,0 +1,272 @@
+deck: Command muscle memory — kubectl vs aws ecs
+tags: [kubectl, cli, ecs-mapping]
+
+cards:
+  - id: cli-list-services
+    q: |
+      ECS: `aws ecs list-services --cluster prod`
+
+      Kubernetes equivalent?
+    a: |
+      ```
+      kubectl get deployments -n prod
+      ```
+
+      Watch the vocabulary: the ECS Service maps to a **Deployment**, not to a
+      `kubectl get services` (which lists networking objects).
+    tags: [deployment, gotcha]
+
+  - id: cli-describe-service
+    q: |
+      ECS: `aws ecs describe-services --services api`
+
+      Kubernetes equivalent, and which one do you actually want when debugging?
+    a: |
+      ```
+      kubectl get deployment api -o yaml     # full spec + status
+      kubectl describe deployment api        # human-readable + Events
+      ```
+
+      `describe` when something is wrong (Events are at the bottom), `-o yaml`
+      when you need exact field values.
+    tags: [debugging]
+
+  - id: cli-scale
+    q: |
+      ECS: `aws ecs update-service --desired-count 5`
+
+      Kubernetes equivalent?
+    a: |
+      ```
+      kubectl scale deployment/api --replicas=5
+      ```
+
+      Imperative and fine for incidents — but it drifts from your YAML. In a
+      GitOps setup, change the manifest instead or it'll be reverted.
+    tags: [scaling, deployment]
+
+  - id: cli-force-new-deployment
+    q: |
+      ECS: `aws ecs update-service --force-new-deployment`
+
+      Kubernetes equivalent?
+    a: |
+      ```
+      kubectl rollout restart deployment/api
+      ```
+
+      Both mean "cycle every task/Pod with no config change" — for picking up a
+      re-pushed image tag or a changed ConfigMap.
+    tags: [rollout, deployment]
+
+  - id: cli-list-tasks
+    q: |
+      ECS: `aws ecs list-tasks --service-name api`
+
+      Kubernetes equivalent?
+    a: |
+      ```
+      kubectl get pods -l app=api -o wide
+      ```
+
+      `-o wide` adds node and Pod IP. Note the selection is by **label**, not by
+      ownership — anything with that label matches.
+    tags: [pods, labels]
+
+  - id: cli-exec
+    q: |
+      ECS: `aws ecs execute-command --interactive --command /bin/sh`
+
+      Kubernetes equivalent?
+    a: |
+      ```
+      kubectl exec -it deploy/api -- /bin/sh
+      kubectl exec -it pod/api-abc -c sidecar -- /bin/sh
+      ```
+
+      `-c` picks the container in a multi-container Pod. Distroless images have
+      no shell — use `kubectl debug` instead.
+    tags: [exec, debugging]
+
+  - id: cli-logs
+    q: |
+      ECS: reading a task's logs in CloudWatch.
+
+      Kubernetes equivalents, including after a crash?
+    a: |
+      ```
+      kubectl logs deploy/api -f --tail=100
+      kubectl logs <pod> --previous       # the crashed instance
+      kubectl logs -l app=api --all-containers --prefix
+      ```
+
+      Unlike CloudWatch, this is node-local and disappears with the Pod — hence
+      the M4 log-aggregation stack.
+    tags: [logs, debugging]
+
+  - id: cli-stop-task
+    q: |
+      ECS: `aws ecs stop-task --task <id>`
+
+      Kubernetes equivalent — and what actually happens?
+    a: |
+      ```
+      kubectl delete pod <name>
+      ```
+
+      The Deployment immediately creates a replacement. You are not removing
+      capacity, you're forcing a replacement — the reconciliation loop in
+      action.
+    tags: [pods, reconciliation]
+
+  - id: cli-list-container-instances
+    q: |
+      ECS: `aws ecs list-container-instances`
+
+      Kubernetes equivalent?
+    a: |
+      ```
+      kubectl get nodes -o wide
+      kubectl describe node <name>      # capacity, allocated, conditions
+      kubectl top nodes                 # live usage (needs metrics-server)
+      ```
+
+      `describe node` shows the requests already committed on that node — the
+      number the scheduler actually reasons about.
+    tags: [nodes]
+
+  - id: cli-register-task-def
+    q: |
+      ECS: `aws ecs register-task-definition --cli-input-json file://td.json`
+
+      Kubernetes equivalent?
+    a: |
+      ```
+      kubectl apply -f deployment.yaml
+      ```
+
+      Key difference: there's no separate "register then deploy." Applying the
+      manifest updates desired state and the rollout begins immediately.
+    tags: [apply, declarative]
+
+  - id: cli-taskdef-revisions
+    q: |
+      ECS: listing Task Definition revisions to roll back.
+
+      Kubernetes equivalent?
+    a: |
+      ```
+      kubectl rollout history deployment/api
+      kubectl rollout history deployment/api --revision=3
+      kubectl rollout undo deployment/api --to-revision=3
+      ```
+
+      Revisions are the old ReplicaSets, kept per
+      `spec.revisionHistoryLimit` (default 10).
+    tags: [rollout, rollback]
+
+  - id: cli-service-events
+    q: |
+      ECS: the "Events" tab showing why a service can't place tasks.
+
+      Kubernetes equivalent?
+    a: |
+      ```
+      kubectl describe pod <name>           # Events section at the bottom
+      kubectl get events -n prod --sort-by=.lastTimestamp
+      ```
+
+      For a Pending Pod this is where you find `Insufficient cpu`, `didn't match
+      node selector`, or `had untolerated taint`.
+    tags: [events, debugging]
+
+  - id: cli-dry-run
+    q: |
+      How do you preview a change before applying it?
+    a: |
+      ```
+      kubectl diff -f deployment.yaml            # diff vs live cluster
+      kubectl apply -f deployment.yaml --dry-run=server
+      ```
+
+      `kubectl diff` has no ECS equivalent and is the single best habit to build
+      — it shows exactly what will change, including defaults the server fills
+      in.
+    tags: [apply, safety, production-realism]
+
+  - id: cli-generate-yaml
+    q: |
+      Fastest way to get a starting manifest without writing YAML by hand?
+    a: |
+      ```
+      kubectl create deployment api --image=nginx \
+        --dry-run=client -o yaml > deployment.yaml
+      ```
+
+      Generates a valid skeleton to edit. The same trick works for
+      `create service`, `create configmap`, `create role`.
+    tags: [yaml, productivity]
+
+  - id: cli-context-switch
+    q: |
+      ECS: `export AWS_PROFILE=prod && export AWS_REGION=us-east-1`
+
+      Kubernetes equivalent?
+    a: |
+      ```
+      kubectl config get-contexts
+      kubectl config use-context kind-k8s-training
+      kubectl config set-context --current --namespace=flashcards
+      ```
+
+      Same "am I pointed at prod?" hazard. `kubectx`/`kubens` and a shell prompt
+      showing the context are worth installing.
+    tags: [kubeconfig, safety]
+
+  - id: cli-port-forward
+    q: |
+      How do you reach a Service that has no external exposure?
+    a: |
+      ```
+      kubectl port-forward svc/flashcards 8080:80
+      kubectl port-forward deploy/flashcards 8080:8080
+      ```
+
+      Tunnels through the API server. Debugging only — it's single-user and dies
+      with your terminal.
+    tags: [networking, debugging]
+
+  - id: cli-auth-can-i
+    q: |
+      ECS: simulating an IAM policy to check permissions.
+
+      Kubernetes equivalent?
+    a: |
+      ```
+      kubectl auth can-i create deployments -n prod
+      kubectl auth can-i --list
+      kubectl auth can-i get pods \
+        --as=system:serviceaccount:prod:api-sa -n prod
+      ```
+
+      `--as` impersonation is the fastest way to verify a ServiceAccount's RBAC
+      actually matches what you intended.
+    tags: [rbac, verification]
+
+  - id: cli-debug-container
+    q: |
+      Your image is distroless — no shell, no tools. How do you get a debugger
+      into that Pod?
+    a: |
+      ```
+      kubectl debug -it <pod> --image=busybox --target=<container>
+      ```
+
+      Attaches an **ephemeral container** sharing the target's namespaces, so
+      you can inspect the process and network without shipping tools in your
+      production image.
+    ecs: |
+      No ECS equivalent — ECS Exec needs the SSM agent and a shell *in* your
+      image. This is strictly better: keep images minimal, add tooling only when
+      debugging.
+    tags: [debugging, security]

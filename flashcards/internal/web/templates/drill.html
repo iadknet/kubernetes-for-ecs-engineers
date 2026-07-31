@@ -1,0 +1,13 @@
+{{template "head" "Drill"}}
+
+<p class="muted small">Scope: <strong>{{.Filter.Label}}</strong> ·
+  <a href="/">change</a>{{if not .Filter.Cram}} ·
+  <a href="/drill?cram=1">cram mode</a>{{end}}</p>
+
+{{if .HasCard}}
+  {{template "card-front" .Card}}
+{{else}}
+  {{template "card-done" .}}
+{{end}}
+
+{{template "foot"}}

@@ -1,0 +1,328 @@
+deck: Foundations — cluster anatomy and the API model
+module: M0
+tags: [foundations]
+
+cards:
+  - id: m0-control-plane-components
+    q: |
+      What are the four control-plane components, and what does each do?
+    a: |
+      - **kube-apiserver** — the only front door. Everything (kubectl, kubelets,
+        controllers) talks to it; it's the only component that touches etcd.
+      - **etcd** — the database. All cluster state lives here.
+      - **kube-scheduler** — decides *which node* an unassigned Pod runs on.
+      - **kube-controller-manager** — runs the built-in controllers that
+        continuously reconcile actual state toward desired state.
+    ecs: |
+      ECS has all of this too — AWS just never shows it to you. There is no
+      `aws ecs get-scheduler`. In K8s these are inspectable processes, and on
+      KIND they run as Pods in `kube-system` you can read logs from.
+    tags: [control-plane, architecture]
+
+  - id: m0-kubelet
+    q: |
+      What is the kubelet?
+    a: |
+      The agent running on every node. It watches the API server for Pods
+      assigned to its node, tells the container runtime to start them (via CRI),
+      and reports Pod and node status back.
+
+      It is the thing that actually makes containers exist.
+    ecs: |
+      The ECS agent on an EC2 container instance. Nearly 1:1 — including that
+      if it stops reporting, the control plane marks the node unhealthy.
+    tags: [node, kubelet, architecture]
+
+  - id: m0-only-apiserver-touches-etcd
+    q: |
+      Which components are allowed to read and write etcd directly?
+    a: |
+      Only the **API server**. Every other component — scheduler, controllers,
+      kubelets, your code — goes through the API server.
+
+      This is why RBAC on the API server is a real security boundary, and why
+      "talk to the Kubernetes API" always means "talk to kube-apiserver".
+    tags: [control-plane, etcd, security]
+
+  - id: m0-reconciliation-loop
+    q: |
+      Describe the reconciliation loop, and why it's the core mental model of
+      Kubernetes.
+    a: |
+      You write **desired state** to the API server. Controllers continuously
+      observe **actual state**, compare, and act to close the gap — forever, not
+      once.
+
+      Consequence: deleting a Pod owned by a Deployment doesn't remove it; the
+      controller notices the shortfall and makes a new one.
+    ecs: |
+      **No real ECS equivalent — this one is genuinely new.** `aws ecs
+      update-service` is an imperative call: it executes once and returns. K8s
+      never "finishes"; it converges. Learn this deliberately rather than by
+      analogy — almost everything else follows from it.
+    tags: [reconciliation, mental-model, no-ecs-equivalent]
+
+  - id: m0-declarative-vs-imperative
+    q: |
+      `kubectl apply -f` vs `kubectl create -f` — what's the real difference?
+    a: |
+      `create` fails if the object exists. `apply` is declarative: it records
+      your submitted config in an annotation (or via server-side apply) and
+      computes a patch, so re-running it is idempotent.
+
+      `apply` is the one you use in real workflows; the imperative verbs
+      (`create`, `scale`, `expose`) are for quick exploration.
+    ecs: |
+      Imperative kubectl ≈ ad-hoc `aws ecs` CLI calls. `apply` against version
+      controlled YAML ≈ managing ECS through CloudFormation/CDK/Terraform. Same
+      instinct you already have: declare it, don't click it.
+    tags: [kubectl, declarative]
+
+  - id: m0-object-shape
+    q: |
+      Every Kubernetes object has the same four top-level fields. Name them.
+    a: |
+      - `apiVersion` — which API group/version (`v1`, `apps/v1`)
+      - `kind` — the type (`Pod`, `Deployment`)
+      - `metadata` — name, namespace, labels, annotations
+      - `spec` — desired state (what *you* write)
+
+      Plus `status` — actual state, written by controllers. You never author
+      `status`.
+    ecs: |
+      A Task Definition JSON has no equivalent split. The spec/status divide is
+      the reconciliation loop made visible in the data model: spec is your
+      request, status is reality.
+    tags: [api, spec-status]
+
+  - id: m0-node
+    q: |
+      What is a node?
+    a: |
+      A worker machine (VM, bare metal, or on KIND a Docker container) that runs
+      a kubelet, a container runtime, and kube-proxy. Pods are scheduled onto
+      nodes.
+    ecs: |
+      An EC2 container instance in an EC2-backed ECS cluster. The mindset shift
+      from **Fargate** is that nodes are visible and their capacity and health
+      affect your Pods directly — even on EKS where you don't operate them, you
+      reason about them during incidents.
+    tags: [node, architecture]
+
+  - id: m0-kubeconfig-context
+    q: |
+      What does a kubeconfig **context** bundle together?
+    a: |
+      A (cluster, user, namespace) triple. Switching context re-points kubectl
+      at a different cluster and/or identity.
+
+          kubectl config get-contexts
+          kubectl config use-context kind-k8s-training
+    ecs: |
+      An AWS named profile + region. `kubectl config use-context` ≈
+      `export AWS_PROFILE=...`. The failure mode is identical and just as
+      embarrassing: running the right command against the wrong cluster.
+    tags: [kubectl, kubeconfig]
+
+  - id: m0-namespace
+    q: |
+      What is a Namespace, and what does it *not* isolate?
+    a: |
+      A soft scoping boundary for named resources — it partitions names, and is
+      the unit RBAC, quotas, and NetworkPolicies attach to.
+
+      It does **not** isolate compute, and by default it does **not** isolate
+      network traffic: Pods in different namespaces can reach each other unless
+      a NetworkPolicy says otherwise.
+    ecs: |
+      **No ECS equivalent.** The closest ECS gets is "use a separate cluster."
+      Worth extra attention precisely because your prior experience gives you no
+      hook for it.
+    tags: [namespace, no-ecs-equivalent, multi-tenancy]
+
+  - id: m0-labels-vs-annotations
+    q: |
+      Labels vs annotations — what's the distinction?
+    a: |
+      **Labels** are identifying metadata you can *select on*. Services,
+      Deployments, and NetworkPolicies find their targets via label selectors.
+
+      **Annotations** are arbitrary non-identifying metadata for tools and
+      controllers. You cannot select on them.
+
+      Rule of thumb: if something needs to *find* it, it's a label.
+    ecs: |
+      ECS tags are closer to annotations — descriptive, not functional. Nothing
+      in ECS wires resources together by tag the way a Service selects Pods.
+    tags: [labels, selectors]
+
+  - id: m0-label-selector
+    q: |
+      How does a Service know which Pods to send traffic to?
+    a: |
+      Its `spec.selector` matches Pod **labels**. Any Pod in the namespace with
+      matching labels and passing readiness becomes an endpoint — regardless of
+      which Deployment (or none) created it.
+
+      Loose coupling by label, not by ownership reference.
+    ecs: |
+      In ECS you explicitly register a Service with a target group. Here the
+      binding is implicit and label-based — which is why a typo'd label produces
+      a Service with zero endpoints and no error message.
+    tags: [labels, selectors, service, gotcha]
+
+  - id: m0-namespaced-vs-cluster-scoped
+    q: |
+      What's the difference between a namespaced and a cluster-scoped resource?
+      Give two examples of each.
+    a: |
+      Namespaced objects live inside a namespace: Pod, Deployment, Service,
+      Secret, Role.
+
+      Cluster-scoped objects don't: Node, Namespace, PersistentVolume,
+      ClusterRole, CustomResourceDefinition.
+
+          kubectl api-resources --namespaced=false
+    tags: [api, namespace]
+
+  - id: m0-kube-system
+    q: |
+      What lives in the `kube-system` namespace?
+    a: |
+      The cluster's own machinery, running as Pods: CoreDNS, kube-proxy, the CNI
+      plugin, and on self-hosted/KIND clusters the control-plane components too.
+
+      Kubernetes runs itself on itself.
+    ecs: |
+      ECS's equivalent machinery is invisible AWS infrastructure. Here you can
+      `kubectl logs` the scheduler — genuinely useful when debugging why a Pod
+      won't schedule.
+    tags: [architecture, kube-system]
+
+  - id: m0-coredns
+    q: |
+      What does CoreDNS do, and what DNS name does a Service get?
+    a: |
+      It's the in-cluster DNS server. Every Service gets:
+
+          <service>.<namespace>.svc.cluster.local
+
+      Within a namespace, `<service>` alone resolves. This is what makes service
+      discovery work without any client-side registry.
+    ecs: |
+      Closer to **ECS Service Connect** than to Cloud Map: it's automatic and
+      on by default for every Service, not an opt-in registration.
+    tags: [dns, networking, service-discovery]
+
+  - id: m0-kube-proxy
+    q: |
+      What is kube-proxy actually doing?
+    a: |
+      Running on each node, it programs the kernel (iptables or IPVS rules) so
+      that traffic to a Service's virtual IP is load-balanced across that
+      Service's ready endpoints.
+
+      There is no proxy process in the data path — it's kernel-level rules.
+    ecs: |
+      ECS hands this to an ALB/NLB you provision and pay for. Here basic
+      east-west load balancing is free, in-kernel, and has no health-check
+      config of its own — readiness probes decide what's in the pool.
+    tags: [networking, kube-proxy, service]
+
+  - id: m0-cni
+    q: |
+      What is the CNI plugin responsible for?
+    a: |
+      Pod networking: giving every Pod an IP and making Pod-to-Pod traffic route
+      across nodes without NAT. Examples: Calico, Cilium, and on EKS the AWS
+      VPC CNI.
+
+      The flat "every Pod can reach every Pod" model is a Kubernetes
+      requirement, and the plugin is what implements it.
+    ecs: |
+      ECS `awsvpc` mode giving each task an ENI and a VPC IP. On EKS this is
+      literally the same idea — Pods get **real VPC IPs**, which caps Pod
+      density per node by ENI/IP limits (an AWS-specific detail, not core K8s).
+    tags: [networking, cni, eks]
+
+  - id: m0-why-multi-node
+    q: |
+      Why is this training cluster deliberately 3 nodes instead of 1?
+    a: |
+      A single-node cluster hides everything that matters in production:
+      scheduling decisions, spreading replicas, node drains, and node failure.
+
+      With one node, "it works" tells you almost nothing about whether it would
+      survive a real cluster.
+    ecs: |
+      Same reason you'd never validate an ECS service against a one-instance
+      cluster with one task. Treat "it worked on a single-node KIND" like
+      "it worked in `docker run` on my laptop."
+    tags: [kind, production-realism]
+
+  - id: m0-kind
+    q: |
+      What is KIND and how does it fake a multi-node cluster?
+    a: |
+      **K**ubernetes **IN** **D**ocker. Each "node" is a Docker container running
+      a kubelet and a container runtime, so a laptop can host a multi-node
+      cluster.
+
+      Consequence: images must be loaded into the node containers
+      (`kind load docker-image`) — nodes can't see your local Docker daemon's
+      image cache.
+    tags: [kind, tooling, acronym]
+
+  - id: m0-describe-vs-get
+    q: |
+      When debugging, why is `kubectl describe` usually more useful than
+      `kubectl get`?
+    a: |
+      `describe` renders the object *plus the recent Events* attached to it —
+      scheduling failures, image pull errors, probe failures, OOM kills.
+
+      That Events section is where the actual reason lives.
+
+          kubectl describe pod <name>
+          kubectl get events --sort-by=.lastTimestamp
+    ecs: |
+      The ECS console's "Events" tab on a service, which you already reach for
+      when a task won't start. Same instinct, different command.
+    tags: [kubectl, debugging, events]
+
+  - id: m0-events-are-ephemeral
+    q: |
+      What's the catch with Kubernetes Events?
+    a: |
+      They expire — typically after about an hour — and they're stored in etcd,
+      not in a log system.
+
+      So they're excellent for live debugging and useless for postmortems unless
+      you're shipping them somewhere (a real gap M4 addresses).
+    tags: [events, debugging, observability]
+
+  - id: m0-api-groups
+    q: |
+      Why is it `apiVersion: v1` for a Pod but `apps/v1` for a Deployment?
+    a: |
+      Kubernetes splits its API into groups. The original core group has no
+      name (`v1`); later types live in named groups (`apps/v1`, `batch/v1`,
+      `networking.k8s.io/v1`, `rbac.authorization.k8s.io/v1`).
+
+      Groups version independently — which is exactly what bites you when a
+      cluster upgrade removes a beta version your manifest still uses.
+    tags: [api, versioning, upgrades]
+
+  - id: m0-kubectl-explain
+    q: |
+      How do you look up valid fields for a resource without leaving the
+      terminal?
+    a: |
+      ```
+      kubectl explain deployment.spec.strategy
+      kubectl explain pod.spec.containers.resources --recursive
+      ```
+
+      It reads the live cluster's OpenAPI schema, so it's correct for *your*
+      cluster version — including CRDs you've installed.
+    tags: [kubectl, tooling]

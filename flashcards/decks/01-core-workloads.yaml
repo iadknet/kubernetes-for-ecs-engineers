@@ -1,0 +1,336 @@
+deck: Core workloads — Pods, Deployments, Services
+module: M1
+tags: [workloads]
+
+cards:
+  - id: m1-pod
+    q: |
+      What is a Pod, and what do containers in one share?
+    a: |
+      The smallest deployable unit: one or more containers that share a network
+      namespace (same IP, same localhost, same port space) and can share
+      volumes.
+
+      They are always scheduled together onto one node, as a unit.
+    ecs: |
+      An ECS **Task**. A multi-container Task Definition maps closely to a
+      multi-container Pod — including the shared-localhost behavior of `awsvpc`
+      mode.
+    tags: [pod]
+
+  - id: m1-pods-are-cattle
+    q: |
+      Why do you almost never create a bare Pod in production?
+    a: |
+      Nothing owns it. If its node dies, it's gone — no controller recreates it,
+      no rollout, no scaling.
+
+      You create a **Deployment** (or StatefulSet/DaemonSet/Job), which owns
+      Pods and reconciles them.
+    ecs: |
+      The same reason you don't `aws ecs run-task` for long-running work — you
+      create a Service so something maintains the desired count.
+    tags: [pod, deployment]
+
+  - id: m1-service-collision
+    q: |
+      Why is "Service" the single most confusing word coming from ECS?
+    a: |
+      In Kubernetes, a **Service** is a *networking* object: a stable virtual IP
+      and DNS name that load-balances to a set of Pods chosen by label selector.
+
+      It manages no replicas and performs no rollouts.
+    ecs: |
+      ECS Service ≈ K8s **Deployment** (desired count + rolling updates).
+      K8s **Service** ≈ the ECS Service's load-balancer / target-group wiring.
+      Same word, different half of the job. Disambiguate every single time.
+    tags: [service, gotcha, naming]
+
+  - id: m1-deployment-replicaset-pod
+    q: |
+      Trace the ownership chain from Deployment to Pod.
+    a: |
+      Deployment → ReplicaSet → Pods.
+
+      The Deployment manages ReplicaSets; each ReplicaSet keeps N identical Pods
+      running. A rolling update creates a *new* ReplicaSet and shifts replicas
+      from old to new — which is exactly why rollback is cheap: the old
+      ReplicaSet is still there at zero replicas.
+    ecs: |
+      ECS collapses this into the Service + Task Definition revisions. The
+      ReplicaSet is the layer ECS doesn't expose.
+    tags: [deployment, replicaset, rollout]
+
+  - id: m1-service-types
+    q: |
+      ClusterIP, NodePort, LoadBalancer — what does each add?
+    a: |
+      - **ClusterIP** (default) — virtual IP reachable only inside the cluster.
+      - **NodePort** — the above, plus a high port opened on *every* node.
+      - **LoadBalancer** — the above, plus an external LB provisioned by the
+        cloud controller.
+
+      Each is a superset of the previous.
+    ecs: |
+      LoadBalancer on EKS = an NLB (via the AWS Load Balancer Controller), the
+      closest thing to attaching an ECS Service to a target group. On KIND,
+      LoadBalancer Services stay `<pending>` forever — no cloud provider to
+      fulfill them.
+    tags: [service, networking]
+
+  - id: m1-headless-service
+    q: |
+      What is a headless Service and when do you want one?
+    a: |
+      `clusterIP: None`. No virtual IP and no kube-proxy load balancing —
+      instead, DNS returns the individual Pod IPs.
+
+      Used when the client needs to address specific Pods: StatefulSets,
+      databases with their own topology awareness, gRPC clients doing their own
+      connection-level balancing.
+    tags: [service, dns, statefulset]
+
+  - id: m1-grpc-l4-gotcha
+    q: |
+      Why does a normal ClusterIP Service load-balance HTTP/1.1 well but gRPC
+      badly?
+    a: |
+      kube-proxy balances **connections**, not requests. gRPC multiplexes many
+      requests over one long-lived HTTP/2 connection, so it pins to a single Pod
+      and stays there.
+
+      Fixes: headless Service + client-side balancing, or a service mesh /
+      L7 proxy.
+    ecs: |
+      Identical failure mode to an NLB (L4) fronting gRPC. If you've hit
+      lopsided task load behind an NLB, this is that same bug.
+    tags: [service, grpc, gotcha, networking]
+
+  - id: m1-endpointslice
+    q: |
+      What is an EndpointSlice and what puts a Pod into one?
+    a: |
+      The list of actual backend IP:port pairs behind a Service. The endpoints
+      controller maintains it from the Service's label selector.
+
+      A Pod is added only when it is **Ready** — so readiness probes are what
+      gate traffic.
+
+          kubectl get endpointslices -l kubernetes.io/service-name=<svc>
+    tags: [service, endpoints, readiness]
+
+  - id: m1-zero-endpoints
+    q: |
+      A Service exists but nothing responds. What's the first thing to check?
+    a: |
+      Whether it has any endpoints:
+
+          kubectl get endpointslices -l kubernetes.io/service-name=<svc>
+
+      Empty almost always means (a) the selector doesn't match the Pod labels,
+      or (b) the Pods aren't Ready. Both fail silently — no error is raised for
+      a Service selecting nothing.
+    tags: [service, debugging, gotcha]
+
+  - id: m1-rolling-update-knobs
+    q: |
+      What do `maxUnavailable` and `maxSurge` control?
+    a: |
+      During a rolling update:
+      - `maxUnavailable` — how many replicas may be down below desired count.
+      - `maxSurge` — how many extra replicas may exist above desired count.
+
+      Defaults are 25% each. `maxUnavailable: 0` buys zero-downtime rollouts at
+      the cost of temporarily needing extra capacity.
+    ecs: |
+      ECS deployment configuration's `minimumHealthyPercent` /
+      `maximumPercent` — the same two dials, expressed as percentages of desired
+      count.
+    tags: [deployment, rollout]
+
+  - id: m1-rollout-commands
+    q: |
+      Which commands drive and reverse a rollout?
+    a: |
+      ```
+      kubectl rollout status deployment/<name>
+      kubectl rollout history deployment/<name>
+      kubectl rollout undo deployment/<name> --to-revision=2
+      kubectl rollout restart deployment/<name>
+      ```
+    ecs: |
+      `rollout restart` ≈ `aws ecs update-service --force-new-deployment`.
+      `rollout undo` ≈ redeploying a previous Task Definition revision — but
+      built in and one command, rather than something you script.
+    tags: [deployment, rollout, kubectl]
+
+  - id: m1-rollout-restart-mechanism
+    q: |
+      How does `kubectl rollout restart` work, given nothing in the spec
+      changed?
+    a: |
+      It stamps a new annotation on the Pod template
+      (`kubectl.kubernetes.io/restartedAt`). That changes the template hash, so
+      a new ReplicaSet is created and a normal rolling update runs.
+
+      A neat illustration of the model: to make something happen, you change
+      desired state and let the controller react.
+    tags: [deployment, rollout, reconciliation]
+
+  - id: m1-imagepullpolicy-latest
+    q: |
+      Why is `:latest` especially dangerous in Kubernetes?
+    a: |
+      With tag `:latest`, `imagePullPolicy` defaults to `Always`; with any other
+      tag it defaults to `IfNotPresent`.
+
+      Worse, `:latest` makes rollouts non-reproducible — two Pods from the same
+      Deployment can run different code, and `rollout undo` can't get you back.
+      Pin tags or digests.
+    ecs: |
+      Same hazard as a Task Definition pointing at a mutable tag, but hits
+      harder: ECS pins per task-definition revision, whereas a K8s ReplicaSet
+      keeps pulling on every Pod restart.
+    tags: [images, gotcha, production-realism]
+
+  - id: m1-daemonset
+    q: |
+      What is a DaemonSet for?
+    a: |
+      Run exactly one Pod per node (optionally a subset via node selectors).
+      Used for node-level agents: log shippers, CNI, node exporters.
+
+      It scales with the node count, not with traffic.
+    ecs: |
+      An ECS **daemon** scheduling strategy service. Direct equivalent — and
+      note EKS Fargate does *not* support DaemonSets, the same way Fargate tasks
+      can't host a node-level agent.
+    tags: [daemonset, workloads]
+
+  - id: m1-statefulset
+    q: |
+      What does a StatefulSet give you that a Deployment doesn't?
+    a: |
+      - Stable, ordinal Pod names (`web-0`, `web-1`) that survive rescheduling
+      - Stable per-Pod storage via `volumeClaimTemplates`
+      - Ordered, one-at-a-time rollout and scale-down
+
+      For databases and anything where "which replica am I" matters.
+    ecs: |
+      **No ECS equivalent.** ECS tasks are interchangeable and anonymous; there
+      is no "task #0 that keeps its identity and its volume."
+    tags: [statefulset, storage, no-ecs-equivalent]
+
+  - id: m1-job-cronjob
+    q: |
+      Job vs CronJob?
+    a: |
+      A **Job** runs Pods to successful completion (with `completions`,
+      `parallelism`, `backoffLimit`). A **CronJob** creates Jobs on a schedule.
+
+      Unlike a Deployment, a finished Job's Pods stay around so you can read
+      their logs — clean them up with `ttlSecondsAfterFinished`.
+    ecs: |
+      Job ≈ `aws ecs run-task` for batch work. CronJob ≈ an EventBridge
+      scheduled rule that runs a task. Here both are first-class API objects
+      instead of two services glued together.
+    tags: [job, cronjob, batch]
+
+  - id: m1-init-vs-sidecar
+    q: |
+      Init container vs sidecar container?
+    a: |
+      **Init containers** run to completion, in order, before app containers
+      start — migrations, waiting on a dependency.
+
+      **Sidecars** run alongside for the Pod's lifetime — proxies, log shippers.
+      Modern Kubernetes models them as init containers with
+      `restartPolicy: Always`, which fixes startup/shutdown ordering.
+    ecs: |
+      Sidecars map cleanly to multi-container Task Definitions with
+      `dependsOn`. Init containers are cleaner here than the ECS
+      `dependsOn: COMPLETE` dance.
+    tags: [pod, containers, sidecar]
+
+  - id: m1-pod-phases
+    q: |
+      What are the Pod phases, and which one hides the most detail?
+    a: |
+      `Pending`, `Running`, `Succeeded`, `Failed`, `Unknown`.
+
+      **Pending** is the interesting one — it means unscheduled (no node fits:
+      resources, taints, affinity) or still pulling images. `kubectl describe
+      pod` tells you which.
+    tags: [pod, debugging, lifecycle]
+
+  - id: m1-crashloopbackoff
+    q: |
+      What does `CrashLoopBackOff` actually mean?
+    a: |
+      The container keeps exiting and the kubelet is backing off (exponentially,
+      up to 5 min) between restarts. It's a *symptom*, not a cause.
+
+      Get the cause from the **previous** container's logs:
+
+          kubectl logs <pod> --previous
+    ecs: |
+      An ECS task that keeps stopping and being replaced by the service
+      scheduler. Same loop — but `--previous` is a genuinely better debugging
+      affordance than digging for the stopped task's logs.
+    tags: [debugging, pod, gotcha]
+
+  - id: m1-restart-policy
+    q: |
+      What are the Pod `restartPolicy` values and which controllers require
+      which?
+    a: |
+      `Always` (default; required by Deployments/StatefulSets/DaemonSets),
+      `OnFailure`, and `Never` (the latter two for Jobs).
+
+      Note it restarts *containers in place* on the same node — it is not the
+      thing that reschedules a Pod elsewhere.
+    tags: [pod, lifecycle]
+
+  - id: m1-port-forward
+    q: |
+      What does `kubectl port-forward` do, and why is it not a production
+      pattern?
+    a: |
+      ```
+      kubectl port-forward svc/flashcards 8080:80
+      ```
+
+      It tunnels a local port through the API server to a Pod. Single-user,
+      single-connection-ish, dies with your terminal, and routes through the
+      control plane.
+
+      It's a debugging tool. Real ingress is a Service + Ingress (M3).
+    ecs: |
+      ECS Exec / SSM port forwarding into a task. Same "break glass to look
+      inside" role, same reason it isn't how users reach your app.
+    tags: [kubectl, debugging, networking]
+
+  - id: m1-kind-load-image
+    q: |
+      Why does a locally built image give `ErrImagePull` on KIND?
+    a: |
+      KIND's nodes are separate containers with their own image stores — they
+      can't see your host Docker daemon's images, and by default Kubernetes
+      tries to pull from a registry.
+
+          kind load docker-image k8s-flashcards:dev --name k8s-training
+
+      Then set `imagePullPolicy: IfNotPresent` so it doesn't try to pull anyway.
+    tags: [kind, images, gotcha]
+
+  - id: m1-what-m1-is-missing
+    q: |
+      You've deployed a Deployment + Service and it serves traffic. What's still
+      missing before this is production-shaped?
+    a: |
+      No resource requests/limits, no probes, possibly one replica, no
+      PodDisruptionBudget, no NetworkPolicy, no metrics.
+
+      "It responds" is the `docker run` bar, not the production bar. M3 closes
+      these deliberately — but be able to name the gaps *now*.
+    tags: [production-realism, m3-preview]
