@@ -175,7 +175,7 @@ func TestStreakCountsConsecutiveDays(t *testing.T) {
 	s, _ := openStore(t, 50)
 	now := time.Now()
 
-	for i := 0; i < 3; i++ {
+	for i := range 3 {
 		day := now.AddDate(0, 0, -i)
 		if _, err := s.Grade("card", review.Good, day); err != nil {
 			t.Fatal(err)
@@ -211,10 +211,12 @@ func TestWritableFailsOnReadOnlyDir(t *testing.T) {
 		t.Fatalf("precondition: store should start writable, got %v", err)
 	}
 
+	//nolint:gosec // G302: making the dir read-only is the point of this test.
 	if err := os.Chmod(dir, 0o500); err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { os.Chmod(dir, 0o700) })
+	//nolint:gosec // G302: 0o700 restores owner access so t.TempDir cleanup can remove the dir.
+	t.Cleanup(func() { _ = os.Chmod(dir, 0o700) })
 
 	if err := s.Writable(); err == nil {
 		t.Error("expected Writable to fail on a read-only directory")
@@ -226,7 +228,7 @@ func TestWritableFailsOnReadOnlyDir(t *testing.T) {
 
 func TestOpenRejectsCorruptState(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "review.json")
-	if err := os.WriteFile(path, []byte("{not json"), 0o644); err != nil {
+	if err := os.WriteFile(path, []byte("{not json"), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := review.Open(path, 20); err == nil {

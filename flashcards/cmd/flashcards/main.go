@@ -61,7 +61,9 @@ func run(log *slog.Logger) error {
 	}
 	log.Info("decks loaded", "decks", len(lib.Decks), "cards", len(lib.Cards))
 
-	if err := os.MkdirAll(dataDir, 0o755); err != nil {
+	// 0o750, not 0o755: only the running user (65532 in the image) and its group
+	// need this directory. gosec G301 flags anything looser.
+	if err := os.MkdirAll(dataDir, 0o750); err != nil {
 		return fmt.Errorf("creating data dir: %w", err)
 	}
 	store, err := review.Open(filepath.Join(dataDir, "review.json"), newPerDay)

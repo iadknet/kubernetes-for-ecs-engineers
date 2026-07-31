@@ -14,19 +14,49 @@ help: ## Show this help
 run: ## Run locally on http://localhost:$(PORT)
 	PORT=$(PORT) go run ./cmd/flashcards
 
+# --- Quality gates -----------------------------------------------------------
+# Every gate is its own target so it can be run and debugged on its own. `check`
+# only composes them. When a pipeline is eventually added it should call these
+# same targets, so a check can never exist in CI but not on a laptop.
+
 .PHONY: test
-test: ## Run all tests
-	go test ./...
+test: ## Run all tests under the race detector
+	go test -race ./...
 
 .PHONY: cover
 cover: ## Run tests with a coverage summary
-	go test -cover ./...
+	go test -race -cover ./...
+
+.PHONY: fmt
+fmt: ## Rewrite files with gofmt + gofumpt
+	golangci-lint fmt
+
+.PHONY: fmt-check
+fmt-check: ## Fail if any file needs formatting (no writes)
+	@golangci-lint fmt --diff
+
+.PHONY: lint
+lint: ## Static analysis (see .golangci.yml; includes gosec)
+	golangci-lint run ./...
+
+.PHONY: vuln
+vuln: ## Scan dependencies for known vulnerabilities that our code actually reaches
+	go tool govulncheck ./...
+
+.PHONY: verify
+verify: ## Verify module checksums and that go.mod/go.sum are tidy
+	go mod verify
+	go mod tidy -diff
 
 .PHONY: check
-check: ## Format check, vet, and test
-	@test -z "$$(gofmt -l .)" || { echo "gofmt needed:"; gofmt -l .; exit 1; }
-	go vet ./...
-	go test ./...
+check: fmt-check lint vuln verify test ## Run every quality gate (what CI would run)
+	@echo "all checks passed"
+
+.PHONY: tools
+tools: ## Report whether the local toolchain is present
+	@printf 'go            %s\n' "$$(go version 2>/dev/null || echo MISSING)"
+	@printf 'golangci-lint %s\n' "$$(golangci-lint version 2>/dev/null || echo 'MISSING - brew install golangci-lint')"
+	@printf 'govulncheck   %s\n' "$$(go tool govulncheck -version 2>/dev/null | grep Scanner || echo 'MISSING - go get -tool golang.org/x/vuln/cmd/govulncheck')"
 
 .PHONY: build
 build: ## Build the binary into ./bin

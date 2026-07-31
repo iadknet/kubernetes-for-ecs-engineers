@@ -25,6 +25,7 @@ import (
 // Grade is a self-assessed answer quality, matching FSRS ratings.
 type Grade = fsrs.Rating
 
+// The four FSRS ratings a reviewer can give an answer.
 const (
 	Again = fsrs.Again // forgot it
 	Hard  = fsrs.Hard  // recalled with real difficulty
@@ -66,6 +67,7 @@ func Open(path string, newPerDay int) (*Store, error) {
 		},
 	}
 
+	//nolint:gosec // G304: path is the operator-supplied DATA_DIR, not user input.
 	data, err := os.ReadFile(path)
 	switch {
 	case errors.Is(err, os.ErrNotExist):
@@ -128,10 +130,13 @@ func (s *Store) save() error {
 	if err != nil {
 		return fmt.Errorf("creating temp state file in %s: %w", dir, err)
 	}
-	defer os.Remove(tmp.Name())
+	// Cleanup for the failure paths below. After a successful Rename the temp
+	// file no longer exists, so this Remove fails harmlessly; the error is
+	// discarded deliberately rather than masking the real return value.
+	defer func() { _ = os.Remove(tmp.Name()) }()
 
 	if _, err := tmp.Write(data); err != nil {
-		tmp.Close()
+		_ = tmp.Close() // already failing; the write error is the one worth reporting
 		return fmt.Errorf("writing review state: %w", err)
 	}
 	if err := tmp.Close(); err != nil {

@@ -100,6 +100,7 @@ func (f filter) Query() template.URL {
 	if len(v) == 0 {
 		return ""
 	}
+	//nolint:gosec // G203: url.Values.Encode percent-encodes every key and value.
 	return template.URL("?" + v.Encode())
 }
 
@@ -137,6 +138,7 @@ type cardView struct {
 // URL builds an action URL for this card, preserving the drill scope so htmx
 // fragment requests stay inside the same filter.
 func (v cardView) URL(action string) template.URL {
+	//nolint:gosec // G203: the card ID goes through url.PathEscape; Query() is already escaped.
 	return template.URL("/drill/" + url.PathEscape(v.Card.ID) + "/" + action + string(v.Filter.Query()))
 }
 
@@ -146,6 +148,7 @@ func (v cardView) GradeURL(g int) template.URL {
 	if v.Filter.Query() != "" {
 		sep = "&"
 	}
+	//nolint:gosec // G203: g is an int rendered by strconv.Itoa; no attacker-controlled text.
 	return v.URL("grade") + template.URL(sep+"g="+strconv.Itoa(g))
 }
 
@@ -167,8 +170,15 @@ func (s *Server) markdown(src string) template.HTML {
 	var buf bytes.Buffer
 	if err := s.md.Convert([]byte(src), &buf); err != nil {
 		// Fall back to escaped plain text rather than failing the request.
+		//nolint:gosec // G203: src is run through template.HTMLEscapeString on this path.
 		return template.HTML("<p>" + template.HTMLEscapeString(src) + "</p>")
 	}
+	// G203 is a real trust boundary here, not a false positive: goldmark passes raw
+	// HTML in its input straight through, so this trusts deck content. That holds
+	// because decks are authored in-repo and compiled into the binary via embed.FS.
+	// If decks ever become user-supplied, this needs a sanitizer (e.g. bluemonday)
+	// or goldmark configured with html.WithEscapedOutput.
+	//nolint:gosec // G203: deck content is trusted, compile-time input. See comment above.
 	return template.HTML(buf.String())
 }
 
@@ -184,7 +194,7 @@ func (s *Server) next(f filter, exclude string) (deck.Card, bool) {
 	return s.store.Next(cards, s.now())
 }
 
-func (s *Server) handleIndex(w http.ResponseWriter, r *http.Request) {
+func (s *Server) handleIndex(w http.ResponseWriter, _ *http.Request) {
 	now := s.now()
 	type deckRow struct {
 		Name, Module, File string
@@ -284,7 +294,7 @@ func (s *Server) handleBrowse(w http.ResponseWriter, r *http.Request) {
 // that outage into a cluster-wide restart storm.
 func (s *Server) handleHealthz(w http.ResponseWriter, _ *http.Request) {
 	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
-	fmt.Fprintln(w, "ok")
+	_, _ = fmt.Fprintln(w, "ok") // a failed write means the client hung up; nothing to do
 }
 
 // handleReadyz is readiness: can this instance actually serve? Decks must have
@@ -300,7 +310,7 @@ func (s *Server) handleReadyz(w http.ResponseWriter, _ *http.Request) {
 		http.Error(w, "review store not writable: "+err.Error(), http.StatusServiceUnavailable)
 		return
 	}
-	fmt.Fprintf(w, "ok: %d cards, %d decks\n", len(s.lib.Cards), len(s.lib.Decks))
+	_, _ = fmt.Fprintf(w, "ok: %d cards, %d decks\n", len(s.lib.Cards), len(s.lib.Decks))
 }
 
 func (s *Server) render(w http.ResponseWriter, name string, data any) {
@@ -310,7 +320,7 @@ func (s *Server) render(w http.ResponseWriter, name string, data any) {
 		return
 	}
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	buf.WriteTo(w)
+	_, _ = buf.WriteTo(w) // headers are already sent; a write failure is the client's disconnect
 }
 
 func (s *Server) renderFragment(w http.ResponseWriter, name string, data any) {

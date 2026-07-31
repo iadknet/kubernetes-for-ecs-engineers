@@ -1,0 +1,5 @@
+{
+  "name": "gopls-lsp",
+  "description": "Go language server (gopls) for code intelligence, refactoring, and analysis in this repo",
+  "version": "1.0.0"
+}
