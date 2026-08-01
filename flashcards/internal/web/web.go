@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"html/template"
+	"log/slog"
 	"net/http"
 	"net/url"
 	"slices"
@@ -60,6 +61,8 @@ func (s *Server) Routes() *http.ServeMux {
 	mux.HandleFunc("GET /drill", s.handleDrill)
 	mux.HandleFunc("POST /drill/{id}/reveal", s.handleReveal)
 	mux.HandleFunc("POST /drill/{id}/grade", s.handleGrade)
+	mux.HandleFunc("POST /drill/{id}/pick", s.handlePick)
+	mux.HandleFunc("POST /drill/{id}/advance", s.handleAdvance)
 	mux.HandleFunc("GET /checkpoint", s.handleCheckpoint)
 	mux.HandleFunc("POST /checkpoint/{id}/reveal", s.handleCheckpointReveal)
 	mux.HandleFunc("POST /checkpoint/{id}/grade", s.handleCheckpointGrade)
@@ -152,6 +155,57 @@ type cardView struct {
 	Filter filter
 	Stats  review.Stats
 	Terms  int // prerequisite terms pulled into this scope
+
+	// Choices is the recognition rep's options, empty when the card is drilled
+	// by free recall. Whether it is populated is the render mode.
+	Choices []choiceView
+	// Picked is the option chosen in a rep already answered, for the result
+	// fragment. Empty while the question is still open.
+	Picked string
+}
+
+// choiceView is one multiple-choice option: another glossary card's definition,
+// standing in as a wrong answer unless it belongs to the card being drilled.
+type choiceView struct {
+	ID      string
+	A       template.HTML
+	Term    string
+	Correct bool
+}
+
+// IsMultipleChoice reports whether this rep is graded by recognition.
+func (v cardView) IsMultipleChoice() bool { return len(v.Choices) > 0 }
+
+// WasCorrect reports whether the answered rep's pick was the right one.
+func (v cardView) WasCorrect() bool { return v.Picked == v.Card.ID }
+
+// choices builds the options for a glossary card still being recognised.
+//
+// The render mode is a pure function of FSRS state the store already holds —
+// nothing new is persisted, so the state file's format is untouched. A card in
+// Review has been retained and goes back to free recall, which stays the
+// retention bar; recognition is only the on-ramp.
+func (s *Server) choices(c deck.Card) []choiceView {
+	if c.Term == "" || s.store.Mastered(c.ID) {
+		return nil
+	}
+
+	opts := s.lib.Options(c, review.Day(s.now()))
+	if len(opts) < 2 {
+		return nil // a glossary too small to offer a real choice
+	}
+
+	out := make([]choiceView, 0, len(opts))
+	for _, o := range opts {
+		out = append(out, choiceView{
+			ID:      o.ID,
+			A:       s.markdown(o.A),
+			Term:    o.Term,
+			Correct: o.ID == c.ID,
+		})
+	}
+
+	return out
 }
 
 // URL builds an action URL for this card, preserving the drill scope so htmx
@@ -163,25 +217,38 @@ func (v cardView) URL(action string) template.URL {
 
 // GradeURL is URL("grade") with the grade appended.
 func (v cardView) GradeURL(g int) template.URL {
-	sep := "?"
-	if v.Filter.Query() != "" {
-		sep = "&"
-	}
 	//nolint:gosec // G203: g is an int rendered by strconv.Itoa; no attacker-controlled text.
-	return v.URL("grade") + template.URL(sep+"g="+strconv.Itoa(g))
+	return v.URL("grade") + template.URL(v.sep()+"g="+strconv.Itoa(g))
+}
+
+// PickURL is URL("pick") naming the option chosen.
+func (v cardView) PickURL(id string) template.URL {
+	//nolint:gosec // G203: the option id goes through url.QueryEscape.
+	return v.URL("pick") + template.URL(v.sep()+"p="+url.QueryEscape(id))
+}
+
+// sep is the separator that appends a parameter to an action URL, which already
+// carries the drill scope as a query string when the scope is non-empty.
+func (v cardView) sep() string {
+	if v.Filter.Query() == "" {
+		return "?"
+	}
+
+	return "&"
 }
 
 func (s *Server) view(c deck.Card, f filter) cardView {
 	cards, terms := s.scope(f)
 
 	return cardView{
-		Card:   c,
-		Q:      s.markdown(c.Q),
-		A:      s.markdown(c.A),
-		ECS:    s.markdown(c.ECS),
-		Filter: f,
-		Stats:  s.store.Stats(cards, s.now()),
-		Terms:  terms,
+		Card:    c,
+		Q:       s.markdown(c.Q),
+		A:       s.markdown(c.A),
+		ECS:     s.markdown(c.ECS),
+		Filter:  f,
+		Stats:   s.store.Stats(cards, s.now()),
+		Terms:   terms,
+		Choices: s.choices(c),
 	}
 }
 
@@ -319,14 +386,87 @@ func (s *Server) handleGrade(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if _, err := s.store.Grade(id, review.Grade(g), s.now()); err != nil {
-		// Persisting failed — say so rather than silently dropping the review.
-		http.Error(w, "could not record review: "+err.Error(), http.StatusInternalServerError)
+		// Persisting failed — say so rather than silently dropping the review, but
+		// keep the detail (which carries the store's paths) in the logs.
+		slog.Error("recording review", "card", id, "grade", g, "error", err)
+		http.Error(w, "could not record the review", http.StatusInternalServerError)
+
 		return
 	}
 
-	f := filterFrom(r)
+	s.renderNext(w, filterFrom(r), id)
+}
 
-	card, ok := s.next(f, id)
+// handlePick grades a recognition rep. The pick is objectively right or wrong,
+// so the rating follows from it rather than from self-assessment: correct is
+// Good, wrong is Again.
+//
+// The result fragment is shown rather than advancing straight on, because a
+// wrong pick is worth a moment on which option was right.
+func (s *Server) handlePick(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+
+	card, ok := s.lib.Get(id)
+	if !ok {
+		http.Error(w, "unknown card: "+id, http.StatusNotFound)
+		return
+	}
+
+	// The options are recomputed rather than trusted from the request, so a pick
+	// can only ever name something actually offered. They are captured before
+	// grading because grading moves the card, and with it the render mode: the
+	// answered rep keeps the options it was asked with so the result can mark the
+	// right one.
+	opts := s.choices(card)
+	if len(opts) == 0 {
+		http.Error(w, "card "+id+" is not drilled by recognition", http.StatusBadRequest)
+		return
+	}
+
+	pick := r.URL.Query().Get("p")
+
+	if !slices.ContainsFunc(opts, func(c choiceView) bool { return c.ID == pick }) {
+		http.Error(w, "pick must name one of the options offered", http.StatusBadRequest)
+		return
+	}
+
+	g := review.Again
+	if pick == id {
+		g = review.Good
+	}
+
+	if _, err := s.store.Grade(id, g, s.now()); err != nil {
+		slog.Error("recording pick", "card", id, "pick", pick, "error", err)
+		http.Error(w, "could not record the review", http.StatusInternalServerError)
+
+		return
+	}
+
+	// Built after grading so the counts are the post-answer ones, then given back
+	// the options the question was actually asked with.
+	v := s.view(card, filterFrom(r))
+	v.Choices, v.Picked = opts, pick
+
+	s.renderFragment(w, "card-picked", v)
+}
+
+// handleAdvance moves on from an answered recognition rep. It is separate from
+// grading because the pick was already recorded when the result was shown.
+func (s *Server) handleAdvance(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	if _, ok := s.lib.Get(id); !ok {
+		http.Error(w, "unknown card: "+id, http.StatusNotFound)
+		return
+	}
+
+	s.renderNext(w, filterFrom(r), id)
+}
+
+// renderNext serves whatever comes after an answered card: the next card's
+// front, or the done fragment when the scope is exhausted. exclude is the card
+// just answered, which only cram mode can otherwise hand straight back.
+func (s *Server) renderNext(w http.ResponseWriter, f filter, exclude string) {
+	card, ok := s.next(f, exclude)
 	if !ok {
 		cards, terms := s.scope(f)
 		s.renderFragment(w, "card-done", map[string]any{
@@ -425,7 +565,9 @@ func (s *Server) handleCheckpoint(w http.ResponseWriter, r *http.Request) {
 	// provoking the store's sentinel.
 	if s.store.CheckpointStatus(module, cards, s.now()).Available() {
 		if err := s.store.StartCheckpoint(module, cards, s.now()); err != nil {
-			http.Error(w, "could not start the checkpoint: "+err.Error(), http.StatusInternalServerError)
+			slog.Error("starting checkpoint", "module", module, "error", err)
+			http.Error(w, "could not start the checkpoint", http.StatusInternalServerError)
+
 			return
 		}
 	}
@@ -486,7 +628,9 @@ func (s *Server) handleCheckpointGrade(w http.ResponseWriter, r *http.Request) {
 
 		return
 	case err != nil:
-		http.Error(w, "could not record the answer: "+err.Error(), http.StatusInternalServerError)
+		slog.Error("recording checkpoint answer", "module", module, "card", id, "error", err)
+		http.Error(w, "could not record the answer", http.StatusInternalServerError)
+
 		return
 	}
 
@@ -536,7 +680,11 @@ func (s *Server) handleReadyz(w http.ResponseWriter, _ *http.Request) {
 	}
 
 	if err := s.store.Writable(); err != nil {
-		http.Error(w, "review store not writable: "+err.Error(), http.StatusServiceUnavailable)
+		// Warn, not Error: readiness failing is a degraded state the probe is meant
+		// to catch, and it is polled every few seconds.
+		slog.Warn("review store not writable", "error", err)
+		http.Error(w, "review store not writable", http.StatusServiceUnavailable)
+
 		return
 	}
 
@@ -546,7 +694,9 @@ func (s *Server) handleReadyz(w http.ResponseWriter, _ *http.Request) {
 func (s *Server) render(w http.ResponseWriter, name string, data any) {
 	var buf bytes.Buffer // render first so a template error doesn't emit a half page
 	if err := s.tmpl.ExecuteTemplate(&buf, name, data); err != nil {
-		http.Error(w, "template error: "+err.Error(), http.StatusInternalServerError)
+		slog.Error("rendering template", "template", name, "error", err)
+		http.Error(w, "template error", http.StatusInternalServerError)
+
 		return
 	}
 

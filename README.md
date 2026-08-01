@@ -109,6 +109,18 @@ vocabulary arrives before the concepts that use it, not after. A filtered drill
 pulls in the terms it needs, so `/drill?module=M0` teaches M0's vocabulary as
 part of M0. Cram mode (`?cram=1`) ignores all of this on purpose.
 
+A glossary term is introduced as **recognition** before it is drilled as
+recall: while the card is new, the drill asks you to pick its definition out of
+four, and the pick grades itself — right is *Good*, wrong is *Again*, with the
+correct option shown either way. Once the term is retained it reverts to free
+recall, which stays the retention bar. Concept and checkpoint cards are always
+free recall.
+
+The wrong options are picked automatically from confusable siblings — terms
+sharing a tag, or pulled in together by the same card — and re-roll daily.
+`distractors: [id, id, id]` on the card overrides that pick by naming other
+glossary cards, for the terms whose automatic siblings read as also-correct.
+
 A card marked `checkpoint: M0` is a **checkpoint card** — a synthesis question
 that examines the whole module rather than teaching one thing. It gets a
 `requires:` edge to every card in that module automatically, and it stays out

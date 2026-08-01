@@ -78,8 +78,29 @@ The code and the spec must not disagree silently.
 - Run `make check` in `flashcards/` before considering Go work done — the same
   aggregate `.githooks/pre-push` runs, so passing locally means the push passes.
   Single targets like `make test` are for iterating. `make help` lists them.
-- The vendored `golang-*` skills cover style, naming, testing, error handling,
-  and security conventions.
+
+### Required Go Skills
+
+When writing, modifying, reviewing, or diagnosing Go code under `flashcards/`,
+load the applicable repository-local `golang-*` skills before acting:
+
+- Always use `golang-code-style` and `golang-naming` for Go code changes or
+  reviews.
+- Use `golang-testing` whenever tests are created, modified, reviewed, or
+  debugged.
+- Use `golang-error-handling` when errors are created, wrapped, returned,
+  inspected, logged, or mapped to responses.
+- Use `golang-security` for authentication, secrets, user input, filesystem,
+  networking, cryptography, or other security-sensitive code.
+- Use `golang-concurrency` and `golang-context` when their respective primitives
+  are involved.
+- Use `golang-troubleshooting` for bugs, crashes, races, deadlocks, or unexpected
+  behavior.
+- Use `golang-lint` when changing lint configuration or resolving lint findings.
+- Use the remaining `golang-*` skills when their `SKILL.md` descriptions match
+  the task.
+
+Use only the applicable skills; do not load every Go skill for every change.
 
 ## Document Conventions
 

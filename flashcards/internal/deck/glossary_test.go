@@ -2,6 +2,7 @@ package deck_test
 
 import (
 	"regexp"
+	"slices"
 	"sort"
 	"strings"
 	"testing"
@@ -65,6 +66,11 @@ cards:
 	}
 
 	return lib
+}
+
+// loadDeck loads a single-deck fixture written inline.
+func loadDeck(body string) (*deck.Library, error) {
+	return deck.Load(fstest.MapFS{"decks/g.yaml": {Data: []byte(body)}}, "decks")
 }
 
 func ids(cards []deck.Card) []string {
@@ -260,7 +266,7 @@ cards:
     a: a
 `
 
-	lib, err := deck.Load(fstest.MapFS{"decks/g.yaml": {Data: []byte(body)}}, "decks")
+	lib, err := loadDeck(body)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -274,6 +280,403 @@ cards:
 		if c, ok := g[key]; !ok || c.ID != "term-svc" {
 			t.Errorf("glossary[%q] = %v, %v; want term-svc", key, c.ID, ok)
 		}
+	}
+}
+
+// --- Distractors -------------------------------------------------------------
+
+// distractorDeck is a glossary with one obvious neighbourhood — the three
+// control-plane components — plus outsiders, and one concept card whose
+// `requires:` edges make a second, cross-tag neighbourhood.
+//
+// The deck-level tag is deliberately present: every real glossary card carries
+// it, so a selection that treated any shared tag as a neighbourhood signal would
+// see the whole glossary as one neighbourhood and the preference would be inert.
+const distractorDeck = `
+deck: Glossary
+tags: [glossary]
+cards:
+  - id: term-apiserver
+    term: apiserver
+    tags: [control-plane]
+    q: apiserver
+    a: The cluster API front door.
+  - id: term-scheduler
+    term: scheduler
+    tags: [control-plane]
+    q: scheduler
+    a: Assigns unassigned workloads to machines.
+  - id: term-controller-manager
+    term: controller-manager
+    tags: [control-plane]
+    q: controller-manager
+    a: Runs the reconciliation loops.
+  - id: term-etcd
+    term: etcd
+    tags: [storage]
+    q: etcd
+    a: The cluster datastore.
+  - id: term-kubelet
+    term: kubelet
+    tags: [machine]
+    q: kubelet
+    a: The per-machine agent.
+  - id: term-ingress
+    term: ingress
+    tags: [network]
+    q: ingress
+    a: HTTP routing from outside the cluster.
+  - id: term-probe
+    term: probe
+    tags: [health]
+    q: probe
+    a: A periodic health check.
+  - id: pairs-etcd-and-kubelet
+    q: |
+      Which two pieces hold state?
+    a: |
+      One of them does.
+    requires: [term-etcd, term-kubelet]
+`
+
+func distractorLib(t *testing.T) *deck.Library {
+	t.Helper()
+
+	lib, err := loadDeck(distractorDeck)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	return lib
+}
+
+func TestDistractors(t *testing.T) {
+	t.Parallel()
+
+	lib := distractorLib(t)
+
+	get := func(id string) deck.Card {
+		t.Helper()
+
+		c, ok := lib.Get(id)
+		if !ok {
+			t.Fatalf("no such card %q", id)
+		}
+
+		return c
+	}
+
+	tests := []struct {
+		name string
+		card string
+		want []string // unordered; empty means "only check the count"
+	}{
+		{
+			name: "prefers the tag neighbourhood over the rest of the glossary",
+			card: "term-apiserver",
+			want: []string{"term-scheduler", "term-controller-manager"},
+		},
+		{
+			name: "prefers terms a single card requires together",
+			card: "term-etcd",
+			want: []string{"term-kubelet"},
+		},
+		{
+			name: "a term with no neighbourhood still gets three",
+			card: "term-probe",
+		},
+		{
+			name: "a term whose only sibling is itself draws from the rest",
+			card: "term-ingress",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			got := ids(lib.Distractors(get(tt.card), "2026-07-31"))
+			if len(got) != 3 {
+				t.Fatalf("Distractors(%s) = %v, want 3", tt.card, got)
+			}
+
+			for _, id := range got {
+				if id == tt.card {
+					t.Errorf("Distractors(%s) included the card's own answer", tt.card)
+				}
+
+				if c, _ := lib.Get(id); c.Term == "" {
+					t.Errorf("Distractors(%s) picked non-glossary card %q", tt.card, id)
+				}
+			}
+
+			for _, id := range tt.want {
+				if !slices.Contains(got, id) {
+					t.Errorf("Distractors(%s) = %v, want it to contain %q", tt.card, got, id)
+				}
+			}
+		})
+	}
+}
+
+// The override exists because an automatic pick can be accidentally also-correct.
+// It must therefore win outright, not merely seed the automatic selection.
+func TestDistractorsOverrideWinsOutright(t *testing.T) {
+	t.Parallel()
+
+	const body = `
+deck: Glossary
+cards:
+  - id: term-apiserver
+    term: apiserver
+    tags: [control-plane]
+    q: apiserver
+    a: The cluster API front door.
+    distractors: [term-etcd, term-kubelet, term-probe]
+  - id: term-scheduler
+    term: scheduler
+    tags: [control-plane]
+    q: scheduler
+    a: Assigns work.
+  - id: term-etcd
+    term: etcd
+    q: etcd
+    a: The datastore.
+  - id: term-kubelet
+    term: kubelet
+    q: kubelet
+    a: The agent.
+  - id: term-probe
+    term: probe
+    q: probe
+    a: A health check.
+`
+
+	lib, err := loadDeck(body)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	c, _ := lib.Get("term-apiserver")
+
+	got := strings.Join(ids(lib.Distractors(c, "2026-07-31")), ",")
+	if want := "term-etcd,term-kubelet,term-probe"; got != want {
+		t.Errorf("Distractors = %q, want the override %q", got, want)
+	}
+}
+
+// A dangling or non-glossary distractor is fatal at load time: the alternative
+// is a drill that silently offers fewer than four options, or none.
+func TestDistractorsAreValidatedAtLoad(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name, body, want string
+	}{
+		{
+			name: "unknown id",
+			body: `
+deck: G
+cards:
+  - id: term-a
+    term: Alpha
+    q: q
+    a: a
+    distractors: [term-nope]
+`,
+			want: `term-nope`,
+		},
+		{
+			name: "not a glossary card",
+			body: `
+deck: G
+cards:
+  - id: term-a
+    term: Alpha
+    q: q
+    a: a
+    distractors: [plain]
+  - id: plain
+    q: q
+    a: a
+`,
+			want: `plain`,
+		},
+		{
+			// More distractors than a question has room for means the extras are
+			// silently dropped. Say so at load rather than picking three at random.
+			name: "more distractors than a question offers",
+			body: `
+deck: G
+cards:
+  - id: term-a
+    term: Alpha
+    q: q
+    a: a
+    distractors: [term-b, term-c, term-d, term-e]
+  - id: term-b
+    term: Bravo
+    q: q
+    a: a
+  - id: term-c
+    term: Charlie
+    q: q
+    a: a
+  - id: term-d
+    term: Delta
+    q: q
+    a: a
+  - id: term-e
+    term: Echo
+    q: q
+    a: a
+`,
+			want: `term-a`,
+		},
+		{
+			name: "the card itself",
+			body: `
+deck: G
+cards:
+  - id: term-a
+    term: Alpha
+    q: q
+    a: a
+    distractors: [term-a]
+`,
+			want: `itself`,
+		},
+		{
+			name: "distractors without a term",
+			body: `
+deck: G
+cards:
+  - id: plain
+    q: q
+    a: a
+    distractors: [term-a]
+  - id: term-a
+    term: Alpha
+    q: q
+    a: a
+`,
+			want: `no 'term'`,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			_, err := loadDeck(tt.body)
+			if err == nil {
+				t.Fatal("expected a load error")
+			}
+
+			if !strings.Contains(err.Error(), tt.want) {
+				t.Errorf("error %q should mention %q", err, tt.want)
+			}
+		})
+	}
+}
+
+// The options have to be stable for as long as the card is on screen, and
+// re-rolled often enough that the position of the right answer is not itself
+// learnable. Seeding from the card id and the day gives both, with no clock to
+// inject and no global rand state to reset.
+func TestOptionsAreStablePerDay(t *testing.T) {
+	t.Parallel()
+
+	lib := distractorLib(t)
+
+	c, _ := lib.Get("term-apiserver")
+
+	first := strings.Join(ids(lib.Options(c, "2026-07-31")), ",")
+	if again := strings.Join(ids(lib.Options(c, "2026-07-31")), ","); first != again {
+		t.Errorf("same card and day gave %q then %q", first, again)
+	}
+
+	var rerolled bool
+
+	for _, d := range []string{"2026-08-01", "2026-08-02", "2026-08-03", "2026-08-04"} {
+		if strings.Join(ids(lib.Options(c, d)), ",") != first {
+			rerolled = true
+			break
+		}
+	}
+
+	if !rerolled {
+		t.Errorf("options %q never changed across four other days: the day is not in the seed", first)
+	}
+}
+
+func TestOptionsContainTheAnswer(t *testing.T) {
+	t.Parallel()
+
+	lib := distractorLib(t)
+
+	for _, id := range []string{"term-apiserver", "term-probe", "term-etcd"} {
+		t.Run(id, func(t *testing.T) {
+			t.Parallel()
+
+			c, _ := lib.Get(id)
+
+			got := ids(lib.Options(c, "2026-07-31"))
+			if len(got) != 4 {
+				t.Fatalf("Options(%s) = %v, want 4", id, got)
+			}
+
+			if !slices.Contains(got, id) {
+				t.Errorf("Options(%s) = %v, missing the correct answer", id, got)
+			}
+		})
+	}
+}
+
+// A concept card is not drilled by recognition, so it has no options at all.
+func TestOptionsAreGlossaryOnly(t *testing.T) {
+	t.Parallel()
+
+	lib := distractorLib(t)
+
+	c, _ := lib.Get("pairs-etcd-and-kubelet")
+	if got := lib.Options(c, "2026-07-31"); got != nil {
+		t.Errorf("Options(concept card) = %v, want nil", ids(got))
+	}
+
+	if got := lib.Distractors(c, "2026-07-31"); got != nil {
+		t.Errorf("Distractors(concept card) = %v, want nil", ids(got))
+	}
+}
+
+// Four options need four glossary cards. A glossary too small to fill them must
+// degrade to what it has rather than repeat a term or panic.
+func TestOptionsDegradeInATinyGlossary(t *testing.T) {
+	t.Parallel()
+
+	const body = `
+deck: G
+cards:
+  - id: term-a
+    term: Alpha
+    q: q
+    a: a
+  - id: term-b
+    term: Beta
+    q: q
+    a: b
+`
+
+	lib, err := loadDeck(body)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	c, _ := lib.Get("term-a")
+
+	got := ids(lib.Options(c, "2026-07-31"))
+	if len(got) != 2 {
+		t.Fatalf("Options = %v, want the 2 cards that exist", got)
 	}
 }
 

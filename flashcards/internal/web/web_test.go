@@ -3,6 +3,7 @@ package web_test
 import (
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"path/filepath"
 	"regexp"
 	"strconv"
@@ -57,6 +58,75 @@ func newServer(t *testing.T) http.Handler {
 	}
 
 	return srv.Routes()
+}
+
+// unwritableServer builds a server whose review store cannot save, by taking
+// away write permission on the directory holding it.
+func unwritableServer(t *testing.T) (http.Handler, string) {
+	t.Helper()
+
+	if os.Geteuid() == 0 {
+		t.Skip("running as root: directory permissions do not block writes")
+	}
+
+	lib, err := deck.Load(fstest.MapFS{"decks/test.yaml": {Data: []byte(testDeck)}}, "decks")
+	if err != nil {
+		t.Fatalf("loading test deck: %v", err)
+	}
+
+	dir := t.TempDir()
+
+	store, err := review.Open(filepath.Join(dir, "review.json"), 20)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	//nolint:gosec // G302: a directory needs its search bit; 0600 would make it unusable.
+	if err := os.Chmod(dir, 0o500); err != nil {
+		t.Fatal(err)
+	}
+	// Restore write permission or TempDir cleanup cannot remove the directory.
+	//nolint:gosec // G302: as above — directory permissions, not file permissions.
+	t.Cleanup(func() { _ = os.Chmod(dir, 0o700) })
+
+	srv, err := web.New(lib, store)
+	if err != nil {
+		t.Fatalf("building server: %v", err)
+	}
+
+	return srv.Routes(), dir
+}
+
+// A failing store must not narrate itself to the client: its errors carry the
+// filesystem paths the process runs on, and the response is the one place those
+// should never appear. The detail belongs in the logs.
+func TestInternalErrorsAreNotLeakedToTheClient(t *testing.T) {
+	t.Parallel()
+
+	h, dir := unwritableServer(t)
+
+	for _, tt := range []struct {
+		name   string
+		method string
+		target string
+		status int
+	}{
+		{"grading a card", http.MethodPost, "/drill/card-one/grade?g=3", http.StatusInternalServerError},
+		{"readiness", http.MethodGet, "/readyz", http.StatusServiceUnavailable},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			rec := do(t, h, tt.method, tt.target)
+			if rec.Code != tt.status {
+				t.Fatalf("status = %d, want %d", rec.Code, tt.status)
+			}
+
+			if body := rec.Body.String(); strings.Contains(body, dir) {
+				t.Errorf("response leaks the store path %q:\n%s", dir, body)
+			}
+		})
+	}
 }
 
 func do(t *testing.T, h http.Handler, method, target string) *httptest.ResponseRecorder {
@@ -262,8 +332,10 @@ func TestRealDecksRenderEndToEnd(t *testing.T) {
 
 	h := srv.Routes()
 
-	if rec := do(t, h, "GET", "/browse"); rec.Code != http.StatusOK {
-		t.Fatalf("browsing every real card failed: %d", rec.Code)
+	for _, path := range []string{"/browse", "/drill"} {
+		if rec := do(t, h, "GET", path); rec.Code != http.StatusOK {
+			t.Fatalf("GET %s over the real decks failed: %d", path, rec.Code)
+		}
 	}
 
 	for _, c := range lib.Cards {
@@ -320,13 +392,17 @@ cards:
       In the datastore, for about an hour.
 `
 
-func gatedServer(t *testing.T) (http.Handler, *deck.Library) {
+// serverOver builds a server over the given decks, named by file so the deck
+// number that orders them is part of the fixture.
+func serverOver(t *testing.T, decks map[string]string) (http.Handler, *deck.Library, *review.Store) {
 	t.Helper()
 
-	lib, err := deck.Load(fstest.MapFS{
-		"decks/00-glossary.yaml":    {Data: []byte(gatedDecks)},
-		"decks/01-foundations.yaml": {Data: []byte(gatedModule)},
-	}, "decks")
+	files := fstest.MapFS{}
+	for name, body := range decks {
+		files["decks/"+name] = &fstest.MapFile{Data: []byte(body)}
+	}
+
+	lib, err := deck.Load(files, "decks")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -341,7 +417,18 @@ func gatedServer(t *testing.T) (http.Handler, *deck.Library) {
 		t.Fatal(err)
 	}
 
-	return srv.Routes(), lib
+	return srv.Routes(), lib, store
+}
+
+func gatedServer(t *testing.T) (http.Handler, *deck.Library) {
+	t.Helper()
+
+	h, lib, _ := serverOver(t, map[string]string{
+		"00-glossary.yaml":    gatedDecks,
+		"01-foundations.yaml": gatedModule,
+	})
+
+	return h, lib
 }
 
 func TestModuleDrillIntroducesItsPrerequisiteTerms(t *testing.T) {
@@ -419,6 +506,266 @@ func TestIndexDeckRowsAreNotExpanded(t *testing.T) {
 	}
 }
 
+// --- Multiple choice ---------------------------------------------------------
+
+// A glossary big enough to fill four options, plus a concept card that must
+// stay on the free-recall path.
+const recognitionDeck = `
+deck: Glossary
+module: M0
+tags: [glossary]
+cards:
+  - id: term-pod
+    term: Pod
+    tags: [workload]
+    q: |
+      Pod
+    a: |
+      The smallest deployable unit.
+  - id: term-node
+    term: node
+    tags: [machine]
+    q: |
+      node
+    a: |
+      A machine that runs workloads.
+  - id: term-etcd
+    term: etcd
+    tags: [storage]
+    q: |
+      etcd
+    a: |
+      The cluster datastore.
+  - id: term-kubelet
+    term: kubelet
+    tags: [machine]
+    q: |
+      kubelet
+    a: |
+      The per-machine agent.
+  - id: concept-one
+    q: |
+      Why is scheduling a placement decision?
+    a: |
+      Because capacity is finite.
+`
+
+func recognitionServer(t *testing.T) (http.Handler, *review.Store) {
+	t.Helper()
+
+	h, _, store := serverOver(t, map[string]string{"00-glossary.yaml": recognitionDeck})
+
+	return h, store
+}
+
+// master drives a card to FSRS Review state, which is what flips it from
+// recognition back to free recall.
+func master(t *testing.T, store *review.Store, id string) {
+	t.Helper()
+
+	now := time.Now()
+
+	for i := range 10 {
+		if store.Mastered(id) {
+			return
+		}
+
+		if _, err := store.Grade(id, review.Easy, now.AddDate(0, 0, i)); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	if !store.Mastered(id) {
+		t.Fatalf("card %q never reached Review state", id)
+	}
+}
+
+func TestNewGlossaryCardDrillsAsMultipleChoice(t *testing.T) {
+	t.Parallel()
+
+	h, _ := recognitionServer(t)
+
+	rec := do(t, h, "GET", "/drill?tag=workload")
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, body: %s", rec.Code, rec.Body)
+	}
+
+	body := rec.Body.String()
+	if !strings.Contains(body, "/pick") {
+		t.Fatalf("a new glossary card should offer options to pick from, got: %s", body)
+	}
+
+	if strings.Contains(body, "/reveal") {
+		t.Error("a recognition rep should not offer a free-recall reveal")
+	}
+
+	if n := strings.Count(body, "/pick?"); n != 4 {
+		t.Errorf("rendered %d options, want 4", n)
+	}
+
+	// Every option is a definition, and the right one is among them.
+	if !strings.Contains(body, "smallest deployable unit") {
+		t.Error("the correct definition should be one of the options")
+	}
+}
+
+func TestRetainedGlossaryCardDrillsAsFreeRecall(t *testing.T) {
+	t.Parallel()
+
+	h, store := recognitionServer(t)
+	master(t, store, "term-pod")
+
+	rec := do(t, h, "POST", "/drill/term-pod/reveal?tag=workload")
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, body: %s", rec.Code, rec.Body)
+	}
+
+	body := rec.Body.String()
+	if !strings.Contains(body, "smallest deployable unit") {
+		t.Error("a retained glossary card should reveal its answer as prose")
+	}
+
+	if strings.Contains(body, "/pick") {
+		t.Error("a retained glossary card was still offered as multiple choice")
+	}
+}
+
+// Recognition is objectively graded: the pick is right or wrong, and the rating
+// follows from that rather than from self-assessment.
+func TestPickGradesCorrectAsGoodAndWrongAsAgain(t *testing.T) {
+	t.Parallel()
+
+	nextDue := func(t *testing.T, pick string) time.Time {
+		t.Helper()
+
+		h, store := recognitionServer(t)
+
+		rec := do(t, h, "POST", "/drill/term-pod/pick?p="+pick)
+		if rec.Code != http.StatusOK {
+			t.Fatalf("status = %d, body: %s", rec.Code, rec.Body)
+		}
+
+		return store.Stats([]deck.Card{{ID: "term-pod"}}, time.Now()).NextDue
+	}
+
+	right := nextDue(t, "term-pod")
+	wrong := nextDue(t, "term-node")
+
+	if right.IsZero() || wrong.IsZero() {
+		t.Fatalf("a pick should schedule the card; got right=%v wrong=%v", right, wrong)
+	}
+
+	if !wrong.Before(right) {
+		t.Errorf("a wrong pick (%v) should come back sooner than a correct one (%v)", wrong, right)
+	}
+}
+
+// A wrong pick is a taught moment, not just an Again: the rep has to say which
+// option was right.
+func TestPickShowsTheCorrectAnswer(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name, pick, want string
+	}{
+		{"correct", "term-pod", "Correct"},
+		{"wrong", "term-etcd", "Not quite"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			h, _ := recognitionServer(t)
+
+			rec := do(t, h, "POST", "/drill/term-pod/pick?p="+tt.pick)
+			if rec.Code != http.StatusOK {
+				t.Fatalf("status = %d, body: %s", rec.Code, rec.Body)
+			}
+
+			body := rec.Body.String()
+			if !strings.Contains(body, tt.want) {
+				t.Errorf("expected the result to say %q, got: %s", tt.want, body)
+			}
+
+			if !strings.Contains(body, "smallest deployable unit") {
+				t.Error("the result should show the correct definition")
+			}
+
+			if !strings.Contains(body, "/advance") {
+				t.Error("the result should offer a way on to the next card")
+			}
+		})
+	}
+}
+
+func TestAdvanceMovesToTheNextCard(t *testing.T) {
+	t.Parallel()
+
+	h, _ := recognitionServer(t)
+
+	if rec := do(t, h, "POST", "/drill/term-pod/pick?p=term-pod"); rec.Code != http.StatusOK {
+		t.Fatalf("pick = %d: %s", rec.Code, rec.Body)
+	}
+
+	rec := do(t, h, "POST", "/drill/term-pod/advance")
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, body: %s", rec.Code, rec.Body)
+	}
+
+	if body := rec.Body.String(); strings.Contains(body, "term-pod/pick") {
+		t.Errorf("advance re-served the card just answered: %s", body)
+	}
+}
+
+func TestPickRejectsBadInput(t *testing.T) {
+	t.Parallel()
+
+	h, store := recognitionServer(t)
+	master(t, store, "term-kubelet")
+
+	tests := []struct {
+		name, target string
+		want         int
+	}{
+		{"unknown card", "/drill/nope/pick?p=term-pod", http.StatusNotFound},
+		{"missing pick", "/drill/term-pod/pick", http.StatusBadRequest},
+		{"pick is not an option", "/drill/term-pod/pick?p=concept-one", http.StatusBadRequest},
+		{"concept card", "/drill/concept-one/pick?p=concept-one", http.StatusBadRequest},
+		{"retained card", "/drill/term-kubelet/pick?p=term-kubelet", http.StatusBadRequest},
+		{"advance on an unknown card", "/drill/nope/advance", http.StatusNotFound},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			if got := do(t, h, "POST", tt.target).Code; got != tt.want {
+				t.Errorf("POST %s = %d, want %d", tt.target, got, tt.want)
+			}
+		})
+	}
+}
+
+// Concept answers are prose. Distractors for them would be hand-written
+// falsehoods rehearsed as reading, so they stay on the free-recall path.
+func TestConceptCardsAreNotMultipleChoice(t *testing.T) {
+	t.Parallel()
+
+	h, store := recognitionServer(t)
+	for _, id := range []string{"term-pod", "term-node", "term-etcd", "term-kubelet"} {
+		master(t, store, id)
+	}
+
+	rec := do(t, h, "POST", "/drill/concept-one/reveal")
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, body: %s", rec.Code, rec.Body)
+	}
+
+	if body := rec.Body.String(); strings.Contains(body, "/pick") {
+		t.Errorf("a concept card was offered as multiple choice: %s", body)
+	}
+}
+
 // --- Checkpoints -------------------------------------------------------------
 
 const checkpointModule = `
@@ -453,24 +800,9 @@ cards:
 func checkpointServer(t *testing.T) (http.Handler, *review.Store) {
 	t.Helper()
 
-	lib, err := deck.Load(fstest.MapFS{
-		"decks/01-foundations.yaml": {Data: []byte(checkpointModule)},
-	}, "decks")
-	if err != nil {
-		t.Fatal(err)
-	}
+	h, _, store := serverOver(t, map[string]string{"01-foundations.yaml": checkpointModule})
 
-	store, err := review.Open(filepath.Join(t.TempDir(), "review.json"), 20)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	srv, err := web.New(lib, store)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	return srv.Routes(), store
+	return h, store
 }
 
 // masterM0 puts both ordinary M0 cards into FSRS Review state, which is the
@@ -644,6 +976,24 @@ func TestCheckpointRevealShowsTheRubric(t *testing.T) {
 
 	if !strings.Contains(rec.Body.String(), "Rubric") {
 		t.Errorf("reveal should show the answer and its rubric, got: %s", rec.Body)
+	}
+}
+
+// A checkpoint is a synthesis question with a rubric, not a term with siblings.
+// Recognition must not have reached it.
+func TestCheckpointCardsStayFreeRecall(t *testing.T) {
+	t.Parallel()
+
+	h, store := checkpointServer(t)
+	masterM0(t, store)
+
+	body := do(t, h, "GET", "/checkpoint?module=M0").Body.String()
+	if strings.Contains(body, "/pick") {
+		t.Errorf("a checkpoint card was offered as multiple choice: %s", body)
+	}
+
+	if !strings.Contains(body, "/reveal") {
+		t.Errorf("a checkpoint card should still be revealed and self-graded, got: %s", body)
 	}
 }
 

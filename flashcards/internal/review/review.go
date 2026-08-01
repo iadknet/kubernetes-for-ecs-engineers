@@ -14,6 +14,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"slices"
 	"sort"
 	"sync"
 	"time"
@@ -112,7 +113,7 @@ func Open(path string, newPerDay int) (*Store, error) {
 		s.st.NewSeen = map[string]int{}
 	}
 
-	s.migrate(path)
+	s.migrate()
 
 	return s, nil
 }
@@ -120,7 +121,7 @@ func Open(path string, newPerDay int) (*Store, error) {
 // migrate brings an older state file up to stateVersion. It only ever adds
 // fields: card entries and day counters are never rewritten, because a lost
 // review history is the one failure of this store that cannot be undone.
-func (s *Store) migrate(path string) {
+func (s *Store) migrate() {
 	from := s.st.Version
 	if from >= stateVersion {
 		s.st.Checkpoints = orEmpty(s.st.Checkpoints)
@@ -131,7 +132,7 @@ func (s *Store) migrate(path string) {
 	s.st.Version = stateVersion
 
 	slog.Info("migrated review state",
-		"path", path, "from", from, "to", stateVersion, "cards", len(s.st.Cards))
+		"path", s.path, "from", from, "to", stateVersion, "cards", len(s.st.Cards))
 }
 
 func orEmpty(m map[string]checkpointAttempt) map[string]checkpointAttempt {
@@ -144,10 +145,16 @@ func orEmpty(m map[string]checkpointAttempt) map[string]checkpointAttempt {
 
 func day(t time.Time) string { return t.Format("2006-01-02") }
 
+// Day renders t as the store's day key. It is exported so callers that need to
+// change something once a day — the multiple-choice option seed — re-roll on
+// exactly the same boundary the review counters do, rather than on a second
+// definition of "today" that could drift from this one.
+func Day(t time.Time) string { return day(t) }
+
 // Grade records an answer and returns when the card is next due.
 func (s *Store) Grade(id string, g Grade, now time.Time) (time.Time, error) {
 	if g < fsrs.Again || g > fsrs.Easy {
-		return time.Time{}, fmt.Errorf("invalid grade %d", g)
+		return time.Time{}, fmt.Errorf("review: invalid grade %d", g)
 	}
 
 	s.mu.Lock()
@@ -398,7 +405,15 @@ func (s *Store) Stats(cards []deck.Card, now time.Time) Stats {
 //
 // Callers are expected to read CheckpointStatus and never provoke this; it is
 // the backstop that keeps a hand-crafted request from erasing a recorded pass.
-var ErrCheckpointUnavailable = errors.New("checkpoint is not available")
+var ErrCheckpointUnavailable = errors.New("review: checkpoint is not available")
+
+// ErrCardNotInCheckpoint is returned when a grade names a card the module's
+// exam does not contain.
+//
+// An attempt completes when it holds as many grades as the exam has cards, so
+// an unchecked id is not a harmless typo: enough of them satisfy the count and
+// record a pass having answered nothing.
+var ErrCardNotInCheckpoint = errors.New("review: card is not in the checkpoint")
 
 // CheckpointState is where one module's checkpoint stands.
 type CheckpointState int
@@ -524,11 +539,7 @@ func (s *Store) StartCheckpoint(module string, cards []deck.Card, now time.Time)
 
 	s.st.Checkpoints[module] = checkpointAttempt{Day: day(now), Grades: map[string]Grade{}}
 
-	if err := s.save(); err != nil {
-		return err
-	}
-
-	return nil
+	return s.save()
 }
 
 // NextCheckpoint returns the next card of the attempt in progress. A failed
@@ -558,7 +569,11 @@ func (s *Store) NextCheckpoint(module string, cards []deck.Card) (deck.Card, boo
 // reviews.
 func (s *Store) GradeCheckpoint(module, id string, g Grade, cards []deck.Card, now time.Time) error {
 	if g < fsrs.Again || g > fsrs.Easy {
-		return fmt.Errorf("invalid grade %d", g)
+		return fmt.Errorf("review: invalid grade %d", g)
+	}
+
+	if !slices.ContainsFunc(cards, func(c deck.Card) bool { return c.ID == id }) {
+		return fmt.Errorf("grading checkpoint %s with %q: %w", module, id, ErrCardNotInCheckpoint)
 	}
 
 	s.mu.Lock()
@@ -591,11 +606,7 @@ func (s *Store) GradeCheckpoint(module, id string, g Grade, cards []deck.Card, n
 		}
 	}
 
-	if err := s.save(); err != nil {
-		return err
-	}
-
-	return nil
+	return s.save()
 }
 
 // withheld reports whether a card is outside the daily review economy: an

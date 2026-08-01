@@ -1,6 +1,6 @@
 # Glossary Multiple-Choice Introduction — Technical Spec
 
-**Status**: ⏳ PLANNED
+**Status**: ✅ COMPLETE
 **Last updated**: 2026-07-31
 
 ---
@@ -30,9 +30,13 @@ so it lands here as a follow-on.
 ### Production Bar
 
 - No new persisted state: render mode derives from existing FSRS state, so
-  `stateVersion` stays at 1 and no migration is needed.
+  `stateVersion` is untouched and no migration is needed. (It reads 2 as of
+  `docs/specs/module-checkpoints/SPEC.md`, which landed first; this feature adds
+  nothing to it.)
 - Distractor selection is mechanical and validated at load time; a
-  `distractors:` override naming an unknown id fails startup.
+  `distractors:` override fails startup if it names an unknown id, a
+  non-glossary card, the card itself, or more distractors than a question
+  offers — silently dropping the extras would hide the authoring mistake.
 - Multiple choice applies to glossary cards only — concept answers are prose,
   and prose distractors would be hand-written falsehoods rehearsed as reading.
 
@@ -80,7 +84,7 @@ determinism test a pure input/output check with no clock injection and no
 
 ## Implementation Phases
 
-### Phase 1: Distractor selection — ⏳ PLANNED
+### Phase 1: Distractor selection — ✅ COMPLETE
 
 **Objective**: Every glossary card can produce three valid, useful distractors.
 
@@ -90,31 +94,31 @@ separate branches rather than interleaving.
 
 **Tasks**:
 
-- [ ] Add failing tests: three picked, neighborhood preferred, own answer
+- [x] Add failing tests: three picked, neighborhood preferred, own answer
       excluded, `distractors:` override honored, unknown override id rejected,
       same card id and day yields identical options while a different day
       re-rolls — `internal/deck/glossary_test.go`
-- [ ] Parse and validate `Distractors` in `internal/deck/deck.go`
-- [ ] Implement selection in `internal/deck/glossary.go`
-- [ ] Sync the schema notes in `README.md`
+- [x] Parse and validate `Distractors` in `internal/deck/deck.go`
+- [x] Implement selection in `internal/deck/glossary.go`
+- [x] Sync the schema notes in `README.md`
 
 **Deliverables**:
 
 - Selection implemented and validated in `internal/deck`
 - `README.md` updated
 
-### Phase 2: Drill rendering and grading — ⏳ PLANNED
+### Phase 2: Drill rendering and grading — ✅ COMPLETE
 
 **Objective**: New glossary cards drill as multiple choice; retained ones as
 free recall.
 
 **Tasks**:
 
-- [ ] Add failing tests: a `New`/`Learning` glossary card renders four shuffled
+- [x] Add failing tests: a `New`/`Learning` glossary card renders four shuffled
       options and grades correct→Good, wrong→Again; a `Review` card renders
       free recall; concept cards are unaffected — `internal/web/web_test.go`
-- [ ] Implement the rendering and pick-grading path in `internal/web`
-- [ ] Sync `README.md` "Drilling the vocabulary" with the recognition-first
+- [x] Implement the rendering and pick-grading path in `internal/web`
+- [x] Sync `README.md` "Drilling the vocabulary" with the recognition-first
       behavior
 
 **Deliverables**:
@@ -143,12 +147,18 @@ free recall.
 
 ## Technical Implementation Details
 
-**To be filled in as the code is written.**
-
 ### Key Files
 
-- `flashcards/internal/deck/glossary.go` — distractor selection
-- `flashcards/internal/web/web.go` — render mode and pick grading
+- `flashcards/internal/deck/deck.go` — `Card.Distractors`, and the per-card
+  field checks split out of `parse` into `validateCard`
+- `flashcards/internal/deck/glossary.go` — `validateDistractors`, `Distractors`,
+  `Options`, and the seeded `shuffle`
+- `flashcards/internal/review/review.go` — `Day`, the exported form of the
+  existing `day` key
+- `flashcards/internal/web/web.go` — `Server.choices`, `handlePick`,
+  `handleAdvance`, `renderNext`
+- `flashcards/internal/web/templates/fragments.html` — the `card-front` branch
+  and the `card-picked` result fragment
 
 ### Implementation Patterns
 
@@ -160,7 +170,37 @@ The optional override:
   distractors: [term-kube-controller-manager, term-kube-scheduler, term-etcd]
 ```
 
+**Neighborhood as a score, not a set.** The first cut treated "shares a tag" as
+a boolean neighborhood, which is inert on the real decks: `parse` appends the
+deck's tags to every card, so all 72 glossary cards share `glossary` and the
+whole tier reads as one neighborhood. Candidates are instead scored — 2 per card
+that pulls both terms in through `requires:`, 1 per shared tag — and the top
+three win. A broad deck tag then adds a point to everyone and changes no
+ordering, while a specific shared tag or a shared consumer still does.
+
+**Seeding.** `seed(id, day, purpose)` is FNV-64a over the three parts,
+NUL-separated, feeding a `math/rand/v2` PCG source. The purpose salt keeps the
+choice of distractors and the shuffle of the options from moving together. No
+clock is injected anywhere and no global `rand` state is touched, so the
+determinism test is a plain input/output check.
+
+**Two routes, not one.** `POST /drill/{id}/pick` grades and renders the result;
+`POST /drill/{id}/advance` moves on. Splitting them is what lets a wrong pick
+show which option was right instead of vanishing into the next card. The options
+are recomputed server-side on `pick` and the submitted id must be one of them, so
+a hand-crafted request cannot grade a card against something never offered.
+
 ### Important Notes
+
+- A retained card that lapses to FSRS `Relearning` drops back to recognition
+  until it returns to `Review`. The render mode is exactly "is this card in
+  `Review`", the same `Store.Mastered` predicate prerequisite gating uses — one
+  definition of retained rather than two. Sending a forgotten term back to the
+  on-ramp is the intended behavior, not a side effect worth special-casing.
+- A glossary with fewer than four cards yields fewer options rather than
+  repeating a term, and fewer than two falls back to free recall. This only
+  bites fixture decks, but a drill that offers one option is worse than a
+  reveal button.
 
 - ECS/Fargate contrast: K8s vocabulary is a set of confusable siblings in a
   way ECS's flat surface never was — discrimination between them *is* the
@@ -170,20 +210,38 @@ The optional override:
 
 ## Success Criteria
 
-- [ ] A `New` glossary card renders as multiple choice with three distractors
+- [x] A `New` glossary card renders as multiple choice with three distractors
       drawn from other glossary answers; the same card in `Review` renders as
       free recall — with the state file unchanged in format
-- [ ] A `distractors:` entry naming a missing id fails `deck.Load` with an
+- [x] A `distractors:` entry naming a missing id fails `deck.Load` with an
       error naming the card and the id
-- [ ] Concept cards — and checkpoint cards, if that spec has landed — render
+- [x] Concept cards — and checkpoint cards, if that spec has landed — render
       exactly as before
-- [ ] `make check` passes
+- [x] `make check` passes
 
 ---
 
 ## Troubleshooting Guide
 
-**Not applicable** — no failures encountered yet.
+**A glossary card renders as free recall when it should be recognition.**
+Either the card is already in FSRS `Review` — which is correct, that is the
+graduation — or the library has fewer than two glossary cards, which is only
+reachable in a fixture deck. Check `Store.Mastered(id)` before suspecting the
+selection.
+
+**Every term offers the same distractors.** The neighborhood score has
+collapsed: something is giving every candidate the same total, so the seeded
+shuffle is the only thing ordering them. Deck-level tags do this on purpose and
+harmlessly; a per-card tag applied to the whole glossary would not.
+
+**`deck.Load` fails naming a distractor.** The id is missing, names a
+non-glossary card, or is the card itself. This is deliberate — the process exits
+non-zero and the Pod goes `CrashLoopBackOff` rather than serving a drill with
+three options, matching the vocabulary-tier spec's posture.
+
+**A pick returns 400.** The submitted `p` is not one of the options the server
+computes for that card today. Options re-roll at the day boundary, so a tab left
+open overnight will do this; reloading the drill fixes it.
 
 ---
 

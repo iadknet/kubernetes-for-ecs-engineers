@@ -2,9 +2,51 @@
 <div id="card" class="card">
   <div class="meta">{{with .Card.Module}}{{.}} · {{end}}{{.Card.Deck}}</div>
   <div class="q">{{.Q}}</div>
+  {{if .IsMultipleChoice}}
+    <p class="muted small">Which definition is it?</p>
+    <div class="choices">
+      {{range $i, $c := .Choices}}
+      <button data-key="{{add $i 1}}" hx-post="{{$.PickURL $c.ID}}" hx-target="#card" hx-swap="outerHTML">
+        <b>{{add $i 1}}</b> <span>{{$c.A}}</span>
+      </button>
+      {{end}}
+    </div>
+  {{else}}
   <div class="grades">
     <button data-key="reveal" hx-post="{{.URL "reveal"}}" hx-target="#card" hx-swap="outerHTML">
       Show answer <b>space</b>
+    </button>
+  </div>
+  {{end}}
+</div>
+{{template "drill-stats" .Stats}}
+{{end}}
+
+
+{{define "card-picked"}}
+<div id="card" class="card">
+  <div class="meta">{{with .Card.Module}}{{.}} · {{end}}{{.Card.Deck}}</div>
+  <div class="q">{{.Q}}</div>
+  <p class="verdict {{if .WasCorrect}}right{{else}}wrong{{end}}">
+    {{if .WasCorrect}}Correct{{else}}Not quite — here is the one that matches.{{end}}
+  </p>
+  <div class="choices answered">
+    {{range .Choices}}
+    <div class="choice{{if .Correct}} right{{end}}{{if eq .ID $.Picked}} picked{{end}}">
+      {{if .Correct}}<b>✓</b>{{else if eq .ID $.Picked}}<b>✗</b>{{else}}<b></b>{{end}}
+      <span>{{.A}}</span>
+    </div>
+    {{end}}
+  </div>
+  {{with .ECS}}
+  <div class="ecs">
+    <h4>Coming from ECS</h4>
+    {{.}}
+  </div>
+  {{end}}
+  <div class="grades">
+    <button data-key="reveal" hx-post="{{.URL "advance"}}" hx-target="#card" hx-swap="outerHTML">
+      Next card <b>space</b>
     </button>
   </div>
 </div>

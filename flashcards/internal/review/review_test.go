@@ -1,6 +1,8 @@
 package review_test
 
 import (
+	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -514,6 +516,36 @@ func TestCheckpointCleanSweepPasses(t *testing.T) {
 
 	if got.Day != now.Format("2006-01-02") {
 		t.Errorf("Day = %q, want today's date", got.Day)
+	}
+}
+
+// A grade must name a card in the exam. The completion arithmetic is
+// "as many grades as there are cards", so without this check a caller that
+// grades ids never asked about satisfies it and flips the gate having answered
+// nothing.
+func TestCheckpointRejectsACardOutsideTheExam(t *testing.T) {
+	t.Parallel()
+
+	s, _ := openStore(t, 20)
+	now := time.Now()
+
+	masterModule(t, s, now)
+
+	if err := s.StartCheckpoint("M0", exam(), now); err != nil {
+		t.Fatal(err)
+	}
+
+	for i := range exam() {
+		id := fmt.Sprintf("not-in-the-exam-%d", i)
+
+		err := s.GradeCheckpoint("M0", id, review.Good, exam(), now)
+		if !errors.Is(err, review.ErrCardNotInCheckpoint) {
+			t.Fatalf("GradeCheckpoint(%q) error = %v, want ErrCardNotInCheckpoint", id, err)
+		}
+	}
+
+	if got := s.CheckpointStatus("M0", exam(), now); got.State == review.CheckpointPassed {
+		t.Error("State = passed after grading only cards outside the exam")
 	}
 }
 

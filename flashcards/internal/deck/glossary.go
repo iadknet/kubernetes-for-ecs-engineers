@@ -2,7 +2,11 @@ package deck
 
 import (
 	"fmt"
+	"hash/fnv"
 	"maps"
+	"math/rand/v2"
+	"slices"
+	"sort"
 	"strings"
 )
 
@@ -149,4 +153,169 @@ func (l *Library) Glossary() map[string]Card {
 	maps.Copy(out, l.byTerm)
 
 	return out
+}
+
+// --- Multiple choice ---------------------------------------------------------
+
+// distractorCount is how many wrong options sit alongside the right one. Four
+// options is the usual recognition width: enough that a guess is worth about a
+// quarter, few enough to read at a glance.
+const distractorCount = 3
+
+// validateDistractors checks that every `distractors:` id resolves to a real
+// glossary card other than the card declaring it.
+//
+// Fatal at load time for the same reason a dangling `requires:` edge is: the
+// alternative is a drill that quietly offers a short list of options, or offers
+// a non-glossary card's prose as a one-line definition, and neither announces
+// itself as a deck bug.
+func (l *Library) validateDistractors() error {
+	for _, c := range l.Cards {
+		if len(c.Distractors) > distractorCount {
+			return fmt.Errorf("card %q lists %d distractors, but a question offers %d",
+				c.ID, len(c.Distractors), distractorCount)
+		}
+
+		for _, id := range c.Distractors {
+			if id == c.ID {
+				return fmt.Errorf("card %q lists itself as a distractor", c.ID)
+			}
+
+			other, ok := l.byID[id]
+			if !ok {
+				return fmt.Errorf("card %q lists unknown distractor %q", c.ID, id)
+			}
+
+			if other.Term == "" {
+				return fmt.Errorf("card %q lists distractor %q, which is not a glossary card", c.ID, id)
+			}
+		}
+	}
+
+	return nil
+}
+
+// Distractors returns the wrong options a glossary card is drilled against: up
+// to three other glossary cards, preferring confusable siblings. day is the
+// YYYY-MM-DD the drill is happening on and, with the card id, is the whole
+// seed — the same card yields the same picks all day and re-rolls tomorrow.
+//
+// A non-glossary card returns nil: concept and checkpoint answers are prose, and
+// prose distractors would be hand-written falsehoods rehearsed as reading.
+func (l *Library) Distractors(c Card, day string) []Card {
+	if c.Term == "" {
+		return nil
+	}
+
+	if len(c.Distractors) > 0 {
+		out := make([]Card, 0, len(c.Distractors))
+		for _, id := range c.Distractors {
+			out = append(out, l.byID[id]) // resolved at load time
+		}
+
+		return out
+	}
+
+	cands := make([]Card, 0, len(l.Cards))
+
+	for _, other := range l.Cards {
+		if other.Term != "" && other.ID != c.ID {
+			cands = append(cands, other)
+		}
+	}
+
+	// Shuffle before ranking so that everything sharing a score is ordered by the
+	// seed rather than by authored position, which would otherwise hand the same
+	// deck neighbours to every term in it.
+	shuffle(cands, seed(c.ID, day, "distractors"))
+	scores := l.neighbourScores(c)
+
+	sort.SliceStable(cands, func(i, j int) bool {
+		return scores[cands[i].ID] > scores[cands[j].ID]
+	})
+
+	if len(cands) > distractorCount {
+		cands = cands[:distractorCount]
+	}
+
+	return cands
+}
+
+// neighbourScores rates every other glossary card on how confusable it is with
+// c. Being pulled in as a prerequisite by the same card outweighs a shared tag,
+// because it is evidence one explanation uses both terms together, where a tag
+// may be as broad as the deck.
+func (l *Library) neighbourScores(c Card) map[string]int {
+	const (
+		perConsumer = 2
+		perTag      = 1
+	)
+
+	// Only glossary cards are ever read back out, so scoring anything else is
+	// work spent on entries no caller can reach.
+	out := make(map[string]int, len(l.Cards))
+
+	for _, other := range l.Cards {
+		if other.ID == c.ID || other.Term == "" {
+			continue
+		}
+
+		for _, tag := range other.Tags {
+			if slices.Contains(c.Tags, tag) {
+				out[other.ID] += perTag
+			}
+		}
+	}
+
+	for _, consumer := range l.Cards {
+		if !slices.Contains(consumer.Requires, c.ID) {
+			continue
+		}
+
+		for _, id := range consumer.Requires {
+			if id != c.ID && l.byID[id].Term != "" {
+				out[id] += perConsumer
+			}
+		}
+	}
+
+	return out
+}
+
+// Options returns the cards whose answers make up one multiple-choice question:
+// the right one and its distractors, shuffled. Seeded like Distractors, so the
+// right answer does not sit in a learnable position but does stay put while the
+// question is on screen.
+//
+// A glossary smaller than four cards yields a shorter list rather than repeating
+// a term, which keeps a tiny fixture deck drillable.
+func (l *Library) Options(c Card, day string) []Card {
+	if c.Term == "" {
+		return nil
+	}
+
+	out := append([]Card{c}, l.Distractors(c, day)...)
+	shuffle(out, seed(c.ID, day, "options"))
+
+	return out
+}
+
+// seed derives a stable 64-bit seed from the card id, the day and a purpose, so
+// the shuffle of the options and the choice of the distractors do not move in
+// lockstep. Deriving it rather than reading a clock is what makes the selection
+// a pure function, and keeps math/rand global state out of it.
+func seed(id, day, purpose string) uint64 {
+	h := fnv.New64a()
+	for _, part := range []string{id, day, purpose} {
+		_, _ = h.Write([]byte(part)) // hash.Hash never returns an error
+		_, _ = h.Write([]byte{0})    // separator: "ab"+"c" must not collide with "a"+"bc"
+	}
+
+	return h.Sum64()
+}
+
+func shuffle(cards []Card, s uint64) {
+	//nolint:gosec // G404: this is a deterministic shuffle of study options, not a secret.
+	r := rand.New(rand.NewPCG(s, s>>32))
+	r.Shuffle(len(cards), func(i, j int) { cards[i], cards[j] = cards[j], cards[i] })
 }

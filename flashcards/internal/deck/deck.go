@@ -27,6 +27,12 @@ type Card struct {
 	Term    string   `json:"term"`
 	Aliases []string `json:"aliases"`
 
+	// Distractors overrides the wrong options a glossary card is drilled against
+	// while it is still being recognised, naming other glossary cards by id. It
+	// exists because an automatic pick can be accidentally also-correct; when set
+	// it replaces the automatic selection entirely.
+	Distractors []string `json:"distractors"`
+
 	// Checkpoint names the module this card examines, e.g. "M0". A non-empty
 	// Checkpoint marks the card as a checkpoint card: a synthesis question that
 	// is deliberately not atomic, sat as a pass/fail session rather than drilled.
@@ -121,6 +127,10 @@ func Load(fsys fs.FS, dir string) (*Library, error) {
 	}
 
 	if err := lib.validateRequires(); err != nil {
+		return nil, err
+	}
+
+	if err := lib.validateDistractors(); err != nil {
 		return nil, err
 	}
 
@@ -222,22 +232,8 @@ func parse(data []byte, filename string) (Deck, error) {
 
 	for i := range d.Cards {
 		c := &d.Cards[i]
-		if c.ID == "" {
-			return Deck{}, fmt.Errorf("%s: card #%d has no id", filename, i+1)
-		}
-
-		if strings.TrimSpace(c.Q) == "" || strings.TrimSpace(c.A) == "" {
-			return Deck{}, fmt.Errorf("%s: card %q needs both 'q' and 'a'", filename, c.ID)
-		}
-
-		if c.Term == "" && len(c.Aliases) > 0 {
-			return Deck{}, fmt.Errorf("%s: card %q has 'aliases' but no 'term'", filename, c.ID)
-		}
-
-		// A glossary card teaches one term atomically; a checkpoint card is the
-		// opposite by design. Nothing can be both.
-		if c.Term != "" && c.Checkpoint != "" {
-			return Deck{}, fmt.Errorf("%s: card %q cannot be both a glossary card and a checkpoint card", filename, c.ID)
+		if err := validateCard(c, filename, i); err != nil {
+			return Deck{}, err
 		}
 
 		c.Deck = d.Name
@@ -247,6 +243,37 @@ func parse(data []byte, filename string) (Deck, error) {
 	}
 
 	return d, nil
+}
+
+// validateCard checks one card's own fields. Anything needing the rest of the
+// library — duplicate ids, terms, `requires:` and `distractors:` targets — is
+// checked in Load once every deck is in.
+func validateCard(c *Card, filename string, i int) error {
+	if c.ID == "" {
+		return fmt.Errorf("%s: card #%d has no id", filename, i+1)
+	}
+
+	if strings.TrimSpace(c.Q) == "" || strings.TrimSpace(c.A) == "" {
+		return fmt.Errorf("%s: card %q needs both 'q' and 'a'", filename, c.ID)
+	}
+
+	if c.Term == "" && len(c.Aliases) > 0 {
+		return fmt.Errorf("%s: card %q has 'aliases' but no 'term'", filename, c.ID)
+	}
+
+	// Only glossary cards are drilled as multiple choice, so distractors on
+	// anything else would be authored effort that never renders.
+	if c.Term == "" && len(c.Distractors) > 0 {
+		return fmt.Errorf("%s: card %q has 'distractors' but no 'term'", filename, c.ID)
+	}
+
+	// A glossary card teaches one term atomically; a checkpoint card is the
+	// opposite by design. Nothing can be both.
+	if c.Term != "" && c.Checkpoint != "" {
+		return fmt.Errorf("%s: card %q cannot be both a glossary card and a checkpoint card", filename, c.ID)
+	}
+
+	return nil
 }
 
 // Get returns a card by id.

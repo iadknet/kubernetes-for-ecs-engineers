@@ -89,6 +89,11 @@ self-assessed feeling of readiness.
   the attempt record to render its status line, so the route decides from that
   data rather than round-tripping a sentinel. Day comparison uses the existing
   `day()` helper (`internal/review/review.go:98`).
+- **A grade must name a card in the exam.** An attempt completes when it holds
+  as many grades as the exam has cards, so the store rejects an id the card set
+  does not contain (`ErrCardNotInCheckpoint`) rather than trusting the caller —
+  otherwise enough unchecked ids satisfy the count and record a pass with
+  nothing answered.
 - **After a pass**, the module's checkpoint cards enter normal FSRS rotation as
   ordinary cards — the pass grades are their first reviews — so the synthesis
   keeps being retained.
@@ -214,7 +219,8 @@ checkpoint cards are excluded from the order-sensitive fresh queue.
   edges, unknown module, `term:`+`checkpoint:` conflict.
   `internal/deck/glossary_test.go` — checkpoint exclusion from expansion.
 - Phase 2 tests: `internal/review/review_test.go` — pass/fail/cool-down state
-  machine, post-pass FSRS entry, pre-pass exclusion from `Next`/`Stats`
+  machine, rejection of a grade naming a card outside the exam, post-pass FSRS
+  entry, pre-pass exclusion from `Next`/`Stats`
   (including `Locked`), and the 1→2 migration over
   `internal/review/testdata/state_v1.json`. `internal/web/web_test.go` — route
   gating and the four index states. Time-dependent cases inject `now` through

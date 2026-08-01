@@ -65,6 +65,22 @@
   .g1:hover { border-color: var(--again); } .g2:hover { border-color: var(--hard); }
   .g3:hover { border-color: var(--good); }  .g4:hover { border-color: var(--easy); }
 
+  .choices { display: flex; flex-direction: column; gap: .5rem; margin-top: 1.25rem; }
+  .choices button, .choices .choice {
+    display: flex; gap: .75rem; align-items: baseline; text-align: left; width: 100%;
+    padding: .7rem 1rem; border: 1px solid var(--line); border-radius: 6px; background: var(--card);
+  }
+  .choices b { color: var(--muted); font-size: .75rem; font-weight: 600; min-width: 1ch; }
+  .choices span > :first-child { margin-top: 0; }
+  .choices span > :last-child { margin-bottom: 0; }
+  .choices .choice.right { border-color: var(--good); }
+  .choices .choice.right b { color: var(--good); }
+  .choices .choice.picked:not(.right) { border-color: var(--again); }
+  .choices .choice.picked:not(.right) b { color: var(--again); }
+  .verdict { font-weight: 600; margin: 1.25rem 0 0; }
+  .verdict.right { color: var(--good); }
+  .verdict.wrong { color: var(--again); }
+
   table { border-collapse: collapse; width: 100%; font-size: .9375rem; }
   th, td { text-align: left; padding: .5rem .5rem .5rem 0; border-bottom: 1px solid var(--line); }
   th { font-size: .75rem; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); font-weight: 500; }
