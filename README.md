@@ -8,9 +8,9 @@ in the Teleport SRE challenge (a Go service that talks to the Kubernetes API).
 ## Who this is for
 
 Me: an engineer with extensive AWS ECS/Fargate/container experience learning
-Kubernetes. Every concept here is framed against what I already know from ECS
-(see the `k8s-for-ecs-engineers` skill in `.claude/skills/`), and every
-exercise is held to a **production-realism** bar rather than "it ran locally."
+Kubernetes. Every concept here is framed against what I already know from ECS,
+and every exercise is held to a **production-realism** bar rather than "it ran
+locally."
 
 ## Environment constraint: no cloud account
 
@@ -59,40 +59,41 @@ M5 it's the scaffold that starts talking to the Kubernetes API.
 
 ## The roadmap
 
+This table is the progress tracker — ✅ done · 🚧 in progress · ⏳ not started.
+Update the marker as each module's **Done when** bar is met.
+
 | # | Module | ECS anchor | Teleport challenge level it feeds |
 |---|--------|-----------|-----------------------------------|
-| M0 | Local production-shaped cluster (Docker Desktop + KIND, kubectl) | Spinning up an ECS cluster — but you now see the control plane and nodes | Tooling for all levels |
-| M1 | Core workloads: Pods, Deployments, Services | Task Def → Pod spec; ECS Service → Deployment; target-group wiring → K8s Service | L1–L2 |
-| M2 | Config, Secrets, Namespaces, RBAC (+ Vault & External Secrets Operator) | Task env vars / Secrets Manager refs → ConfigMap/Secret; Task IAM role → ServiceAccount | L3, L5 (Role/RoleBinding) |
-| M3 | Production concerns: limits, probes, HPA, PDB, NetworkPolicy, Helm, Ingress | Task CPU/mem, health checks, service autoscaling, ALB | L3 (Helm, zero-downtime upgrade) |
-| M4 | Observability: Prometheus, Grafana, Loki | CloudWatch Container Insights / awslogs — but self-hosted | L3 health checks; SRE JD core |
-| M5 | Kubernetes development in Go (client-go, informers/watches) | Imperative one-shot ECS API calls → a long-running client that watches & reacts | L1–L4 server |
-| M6 | CRDs + controllers (the operator pattern) | **No ECS equivalent** — genuinely new | L5 |
-| M7 | Cluster authentication: identity & short-lived credentials | IAM is ECS's whole story; K8s stacks authn *and* RBAC — and has **no User object** | — (interview/incident depth) |
-| CAP | Capstone: the Teleport SRE take-home, leveled 1→5 | The whole thing, for real | L1–L5 |
+| 🚧 M0 | Local production-shaped cluster (Docker Desktop + KIND, kubectl) | Spinning up an ECS cluster — but you now see the control plane and nodes | Tooling for all levels |
+| ⏳ M1 | Core workloads: Pods, Deployments, Services | Task Def → Pod spec; ECS Service → Deployment; target-group wiring → K8s Service | L1–L2 |
+| ⏳ M2 | Config, Secrets, Namespaces, RBAC (+ Vault & External Secrets Operator) | Task env vars / Secrets Manager refs → ConfigMap/Secret; Task IAM role → ServiceAccount | L3, L5 (Role/RoleBinding) |
+| ⏳ M3 | Production concerns: limits, probes, HPA, PDB, NetworkPolicy, Helm, Ingress | Task CPU/mem, health checks, service autoscaling, ALB | L3 (Helm, zero-downtime upgrade) |
+| ⏳ M4 | Observability: Prometheus, Grafana, Loki | CloudWatch Container Insights / awslogs — but self-hosted | L3 health checks; SRE JD core |
+| ⏳ M5 | Kubernetes development in Go (client-go, informers/watches) | Imperative one-shot ECS API calls → a long-running client that watches & reacts | L1–L4 server |
+| ⏳ M6 | CRDs + controllers (the operator pattern) | **No ECS equivalent** — genuinely new | L5 |
+| ⏳ M7 | Cluster authentication: identity & short-lived credentials | IAM is ECS's whole story; K8s stacks authn *and* RBAC — and has **no User object** | — (interview/incident depth) |
+| ⏳ CAP | Capstone: the Teleport SRE take-home, leveled 1→5 | The whole thing, for real | L1–L5 |
 
 Detailed objectives, exercises, and "done when" criteria for every module
 live in **[docs/curriculum.md](docs/curriculum.md)**.
-
-Current status is tracked in **[docs/progress.md](docs/progress.md)**.
 
 ## Repo layout
 
 ```
 kubernetes_training/
 ├── README.md                 # you are here
+├── AGENTS.md                 # how work gets done here (spec-first workflow, conventions)
+├── CLAUDE.md                 # thin import of AGENTS.md
 ├── docs/
 │   ├── target-roles.md       # the real jobs + take-home challenges this is grounded in
 │   ├── curriculum.md         # full module-by-module spec
-│   └── progress.md           # living progress tracker
+│   └── specs/                # one directory per feature; TEMPLATE.md at its root
 ├── modules/
 │   └── 00-setup/             # each module gets a directory as we reach it
 │       └── README.md
-├── flashcards/               # spaced-repetition drill + the program's example workload
-│   ├── decks/                # 255 cards, ECS-anchored
-│   └── ...                   # small Go + htmx service, containerized
-└── .claude/skills/
-    └── k8s-for-ecs-engineers/  # ECS-analogy + production-realism teaching rules
+└── flashcards/               # spaced-repetition drill + the program's example workload
+    ├── decks/                # 255 cards, ECS-anchored
+    └── ...                   # small Go + htmx service, containerized
 ```
 
 ## Drilling the vocabulary
@@ -106,6 +107,16 @@ cd flashcards && make run     # http://localhost:8080
 ```
 
 Drill by module (`/drill?module=M3`) to stay inside what you've covered.
+
+## How work starts
+
+Every non-trivial piece of work in this repo starts as a written technical spec
+under **[docs/specs/](docs/specs/)** — one directory per feature, copied from
+[docs/specs/TEMPLATE.md](docs/specs/TEMPLATE.md). We write and refine the spec
+first, then implement it, ticking its checkboxes as tasks land.
+
+The full workflow and the conventions agents follow live in
+**[AGENTS.md](AGENTS.md)**.
 
 ## Start here
 

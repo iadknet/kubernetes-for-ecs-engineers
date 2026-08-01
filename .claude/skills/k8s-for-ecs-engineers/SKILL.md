@@ -6,25 +6,18 @@ description: Use whenever explaining, teaching, or discussing any Kubernetes con
 # Kubernetes for ECS/Fargate Engineers
 
 The user has extensive hands-on AWS ECS/Fargate experience and no Kubernetes
-experience. They are learning Kubernetes to close a gap in their job search.
-Every explanation of a Kubernetes concept should anchor to what they already
-know from ECS/Fargate rather than teaching K8s in a vacuum. All hands-on
-training work should target production-grade realism, not just "make it run
-locally" — see "Train for production, not just for green checkmarks" below.
+experience. Anchor every explanation to what they already know from ECS/Fargate
+rather than teaching K8s in a vacuum.
 
-This project is loosely grounded in real job postings — see
-[`docs/target-roles.md`](../../../docs/target-roles.md) for the current
-target roles (Teleport Senior SRE and IT Security & Automation Engineer)
-and their take-home coding challenges. Use them as a reference for a
-realistic bar and relevant topics, but per the "Scope" section below don't
-over-optimize for these two postings — transferable core Kubernetes skill is
-the goal. One thing worth carrying forward from them: modern SRE/DevOps work
-(and both roles) involves Kubernetes *development*, not just operations — Go
-code against the Kubernetes API (client-go/controller-runtime, CRDs/operators,
-Helm), so include real API-level Go work, not only running manifests. When an
+The bar comes from real job postings in
+[`docs/target-roles.md`](../../../docs/target-roles.md) — use them for realism,
+but don't over-optimize for two postings; transferable Kubernetes skill is the
+goal. The one thing to carry forward: these roles want Kubernetes *development*,
+not just operations — Go against the Kubernetes API (client-go, CRDs/operators,
+Helm) — so include real API-level Go work, not only running manifests. When an
 exercise maps to the SRE challenge (a Deployment-replica API, a Helm chart, a
 controller/CRD), say so and hold it to that challenge's bar: design-doc-first,
-tests for happy and unhappy paths, avoid scope creep.
+tests for happy and unhappy paths, no scope creep.
 
 ## Hard constraint: AWS is the anchor, never the tooling
 
@@ -46,21 +39,9 @@ explanation — but the split is now absolute:
 
 When a topic would naturally reach for a managed AWS service, **substitute the
 self-hosted equivalent and explicitly name what the managed version would have
-done for you.** That contrast is itself good teaching, and it's how the user
-stays interview-ready on AWS without touching it. Current substitutions (the
-authoritative table lives in [`README.md`](../../../README.md)):
-
-| Production on AWS | Use instead (local, on KIND) |
-|---|---|
-| Secrets Manager / SSM Parameter Store | **HashiCorp Vault** in-cluster + **External Secrets Operator** |
-| IRSA / EKS Pod Identity | **Vault Kubernetes auth** (ServiceAccount token → TokenReview) |
-| ALB + AWS Load Balancer Controller | **ingress-nginx** |
-| CloudWatch Container Insights / `awslogs` | **Prometheus + Grafana + Loki** |
-| ECR | local images via `kind load docker-image` |
-| EKS managed control plane | KIND (1 control-plane + 2 workers) |
-
-This *reinforces* the portability goal in "Scope" below — self-hosting the
-equivalent forces learning the mechanism rather than the AWS console button.
+done for you.** That contrast is itself good teaching, and self-hosting forces
+learning the mechanism rather than the AWS console button. The substitution
+table in [`README.md`](../../../README.md) is authoritative — read it there.
 
 ## Scope: workload SRE/DevOps, not cluster/platform operator
 
@@ -104,14 +85,11 @@ when something is an AWS-specific detail rather than core Kubernetes.
    YAML vs task definition JSON) over abstract description when practical.
 5. This applies to explanations, code comments in training material, README
    content, and any conversational answer — not just formal docs.
-6. Give the EKS lens when it affects the *workload* layer, not reflexively.
-   The user runs on managed control planes (EKS matches their background), so
-   surface "here's the vanilla/kind behavior, here's what changes on EKS" when
-   it changes how they deploy or operate a service — see "Running on EKS"
-   below. For the node/infra-operator parts of that section, keep it to
-   conceptual awareness per the "Scope" section above rather than deep dives.
-   Always label which layer you're describing so the user can tell managed
-   AWS behavior apart from portable Kubernetes behavior.
+6. Give the EKS lens when it changes how they deploy or operate a service, not
+   reflexively. Always label portable-Kubernetes behavior vs. EKS-specific
+   behavior — in interviews both come up and the user needs them straight.
+7. A wrong or oversimplified analogy is worse than "this is genuinely new,
+   here's why."
 
 ## Core concept mapping
 
@@ -167,16 +145,19 @@ when something is an AWS-specific detail rather than core Kubernetes.
 ## Train for production, not just for green checkmarks
 
 Local proof-of-concepts (kind/minikube, `kubectl apply` with defaults, a
-single-replica Deployment with no resource limits) are fine as a first pass
-to see a mechanism work. They are not the destination. Whenever setting up
-an exercise, writing a manifest, or reviewing the user's work, actively push
-toward what the same thing looks like run for real, and call out the gap
-when a PoC skips it. Treat "it worked in kind" the way you'd treat "it
-worked in `docker run` on my laptop" for ECS — a necessary but insufficient
-bar.
+single-replica Deployment with no resource limits) are fine as a first pass to
+see a mechanism work. They are not the destination. Treat "it worked in kind"
+the way you'd treat "it worked in `docker run` on my laptop" for ECS — necessary
+but insufficient.
 
-Concretely, default to surfacing these production concerns rather than
-waiting to be asked:
+When building an exercise or reviewing the user's manifests, don't silently
+"fix" a gap and move on: name it, explain the production risk via an
+ECS/Fargate-flavored incident the user would recognize, then show the
+production-grade version. The goal is that they can say in an interview not
+just "I got a Pod running" but "here's what else this needs to be
+production-safe, and why."
+
+Surface these without waiting to be asked:
 
 - **Resource requests/limits are mandatory, not optional.** A Pod with no
   `resources.requests`/`limits` is the K8s equivalent of an ECS Task
@@ -236,30 +217,18 @@ waiting to be asked:
   CDK/CloudFormation/Terraform manage ECS — mention this distinction when
   relevant so manual `kubectl apply` habits don't look production-ready.
 
-When building an exercise or reviewing the user's manifests/YAML, don't
-silently "fix" these gaps and move on — name the gap, explain the production
-risk it maps to (ideally via an ECS/Fargate-flavored incident scenario the
-user would recognize), and then show or suggest the production-grade
-version. The goal is that the user comes away able to say, in an interview,
-not just "I got a Pod running" but "here's what I'd also need for this to be
-production-safe, and why."
-
 ## Running on EKS: the AWS-managed layer (what changes vs. vanilla/kind)
 
-Everything above is portable Kubernetes; this section is the AWS-specific
-layer. **This section is knowledge, not tooling** — per "Hard constraint" above,
-the user has no AWS account, so none of it may become a hands-on step. It stays
+Everything above is portable Kubernetes; this section is the AWS-specific layer.
+**Knowledge, not tooling** — none of it may become a hands-on step. It stays
 because EKS is where they're most likely to land and it comes up constantly in
-interviews. Lead with the core concept and treat EKS as the concrete instance,
-not the point. Mental frame that maps to their ECS
-experience: **EKS is to a self-managed K8s cluster roughly what managed
-ECS/Fargate is to a self-managed Docker host** — AWS takes over some layers, but
-*fewer than Fargate did*, and the seams are where the work lives.
+interviews. The frame that maps to their experience: **EKS is to a self-managed
+K8s cluster roughly what managed ECS/Fargate is to a self-managed Docker
+host** — AWS takes over some layers, but *fewer than Fargate did*, and the seams
+are where the work lives.
 
-Items are tagged **[workload]** (theirs to know deeply) or **[platform]**
-(managed-service / platform-team territory — conceptual awareness for incidents
-and interviews, not a specialization). Split each along "what AWS now manages
-for you" vs. "what's newly your job because it's Kubernetes on AWS":
+Items are tagged **[workload]** (know deeply) or **[platform]** (conceptual
+awareness only, per "Scope"):
 
 - **[platform] The control plane is managed (like ECS's hidden control plane).** On EKS,
   AWS runs the API server, etcd, scheduler, and controller-manager across AZs
@@ -309,11 +278,8 @@ for you" vs. "what's newly your job because it's Kubernetes on AWS":
 - **[platform] Cluster version upgrades are a recurring operational reality.** AWS supports each
   K8s minor version for a limited window then force-upgrades; someone owns
   upgrading the control plane, then node groups, then add-ons, watching version
-  skew and deprecated APIs. On managed clusters this is largely a platform-team
-  concern — but the *workload* fallout the user does own is real: deprecated
-  API versions breaking their manifests, and PodDisruptionBudgets / probes
-  determining whether their service survives the node roll. Teach it from that
-  angle.
+  skew and deprecated APIs. The workload fallout the user owns is covered under
+  "Train for production" above.
 - **[platform] Provisioning is IaC, same instinct as ECS.** `eksctl`, Terraform, or the
   CDK/CloudFormation define the cluster — the same "don't click in the console,
   declare it" habit they already have for ECS. `aws eks update-kubeconfig`
@@ -324,13 +290,3 @@ When teaching a concept on kind, add a one-line "on EKS this becomes…" note
 wherever the managed-service behavior differs materially, so the user is never
 surprised by the gap between what works in this training cluster and what an
 interviewer means by "in production."
-
-## Style guidance
-
-- Keep comparisons honest: a wrong or oversimplified analogy is worse than
-  saying "this is genuinely new, here's why."
-- When giving `kubectl` examples, show the ECS CLI equivalent alongside it
-  where one reasonably exists.
-- Always label portable-Kubernetes behavior vs. EKS-specific behavior (see
-  "Running on EKS") — in interviews both come up, and the user wants to keep
-  the two straight.
