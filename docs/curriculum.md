@@ -44,8 +44,11 @@ retrofitting those teaches the wrong lesson. Its review state is a plain JSON
 file, which fails instructively the first time a Pod reschedules without a
 volume — that's the M3 PVC motivation, hit firsthand.
 
-The app is also how the program's **vocabulary drilling** happens: 255
-ECS-anchored cards covering M0–M7 and the capstone, scheduled with FSRS.
+The app is also how the program's **vocabulary drilling** happens: 327
+ECS-anchored cards covering M0–M7 and the capstone, scheduled with FSRS. The
+first deck is a glossary tier — one term per card — and concept cards declare
+their vocabulary with `requires:`, so a concept is never introduced before the
+terms it depends on have been retained.
 
 ---
 
@@ -67,6 +70,12 @@ config file. Inspect nodes, contexts, and the system pods in `kube-system`.
 **Production concerns to surface:** Real clusters are multi-node and multi-AZ;
 a single-node cluster hides scheduling, disruption, and node-failure behavior.
 We deliberately use multiple nodes from day one.
+
+**Study order:** Vocabulary first. `/drill?module=M0` starts with the glossary
+terms M0's cards depend on and only unlocks the concept cards once those terms
+are retained, so the drill front-loads the ~47 terms M0 uses. Expect the first
+few sessions to be almost entirely glossary; that is the intended shape, not a
+stall.
 
 **Done when:** `kubectl get nodes` shows one control-plane and two worker nodes
 all `Ready`, from a cluster defined in a committed config file.

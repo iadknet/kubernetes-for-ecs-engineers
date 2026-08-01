@@ -278,3 +278,132 @@ func TestOpenRejectsCorruptState(t *testing.T) {
 		t.Error("expected an error for corrupt review state, not a silent reset")
 	}
 }
+
+// --- Prerequisite gating -----------------------------------------------------
+
+// gated builds "concept requires term", the smallest shape the gate has to get
+// right.
+func gated() []deck.Card {
+	return []deck.Card{
+		{ID: "term", Q: "q", A: "a"},
+		{ID: "concept", Q: "q", A: "a", Requires: []string{"term"}},
+	}
+}
+
+// master grades a card until FSRS puts it in Review state — the mastery signal
+// the gate reads. Easy from new usually gets there in one, but the number of
+// steps is FSRS's business, not this test's.
+func master(t *testing.T, s *review.Store, id string, now time.Time) {
+	t.Helper()
+
+	for i := range 10 {
+		if s.Mastered(id) {
+			return
+		}
+
+		if _, err := s.Grade(id, review.Easy, now.Add(time.Duration(i)*24*time.Hour)); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	t.Fatalf("card %q never reached Review state", id)
+}
+
+func TestNextWithholdsCardsWithUnmasteredPrerequisites(t *testing.T) {
+	t.Parallel()
+
+	s, _ := openStore(t, 20)
+	now := time.Now()
+
+	got, ok := s.Next(gated(), now)
+	if !ok || got.ID != "term" {
+		t.Fatalf("Next introduced %q (ok=%v), want the prerequisite term first", got.ID, ok)
+	}
+
+	// Seeing the term is not enough; it has to be retained.
+	if _, err := s.Grade("term", review.Again, now); err != nil {
+		t.Fatal(err)
+	}
+
+	if got, ok := s.Next([]deck.Card{gated()[1]}, now.Add(time.Hour)); ok {
+		t.Errorf("Next returned %q while its prerequisite is still being learned", got.ID)
+	}
+
+	master(t, s, "term", now)
+
+	got, ok = s.Next([]deck.Card{gated()[1]}, now.Add(30*24*time.Hour))
+	if !ok || got.ID != "concept" {
+		t.Errorf("Next = %q (ok=%v), want concept once its prerequisite is mastered", got.ID, ok)
+	}
+}
+
+func TestStatsCountsLockedCards(t *testing.T) {
+	t.Parallel()
+
+	s, _ := openStore(t, 20)
+	now := time.Now()
+
+	st := s.Stats(gated(), now)
+	if st.Locked != 1 {
+		t.Errorf("Locked = %d, want 1 (concept is behind an unmastered term)", st.Locked)
+	}
+
+	if st.New != 2 {
+		t.Errorf("New = %d, want 2: a locked card is still unseen, not a separate bucket", st.New)
+	}
+
+	master(t, s, "term", now)
+
+	if st := s.Stats(gated(), now); st.Locked != 0 {
+		t.Errorf("Locked = %d after mastering the prerequisite, want 0", st.Locked)
+	}
+}
+
+// Cram is the night-before escape hatch. Gating it would remove it.
+func TestCramIgnoresPrerequisites(t *testing.T) {
+	t.Parallel()
+
+	s, _ := openStore(t, 20)
+
+	got, ok := s.Cram([]deck.Card{gated()[1]}, "")
+	if !ok || got.ID != "concept" {
+		t.Errorf("Cram = %q (ok=%v), want concept regardless of its prerequisites", got.ID, ok)
+	}
+}
+
+// Satisfaction is read from the store globally, so narrowing the card set can
+// never make an unmastered prerequisite look satisfied.
+func TestGatingIsNotFooledByANarrowSelection(t *testing.T) {
+	t.Parallel()
+
+	s, _ := openStore(t, 20)
+
+	if got, ok := s.Next([]deck.Card{gated()[1]}, time.Now()); ok {
+		t.Errorf("Next = %q for a selection containing only the locked card", got.ID)
+	}
+}
+
+func TestMasteredReportsReviewState(t *testing.T) {
+	t.Parallel()
+
+	s, _ := openStore(t, 20)
+	now := time.Now()
+
+	if s.Mastered("term") {
+		t.Error("an unseen card should not count as mastered")
+	}
+
+	if _, err := s.Grade("term", review.Again, now); err != nil {
+		t.Fatal(err)
+	}
+
+	if s.Mastered("term") {
+		t.Error("a card just failed should not count as mastered")
+	}
+
+	master(t, s, "term", now)
+
+	if !s.Mastered("term") {
+		t.Error("a card in Review state should count as mastered")
+	}
+}

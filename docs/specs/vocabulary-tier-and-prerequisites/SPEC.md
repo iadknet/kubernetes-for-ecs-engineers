@@ -1,6 +1,6 @@
 # Vocabulary Tier and Prerequisite Gating — Technical Spec
 
-**Status**: ⏳ PLANNED
+**Status**: ✅ COMPLETE
 **Last updated**: 2026-07-31
 
 ---
@@ -111,17 +111,20 @@ reviewer and the build can see:
 
 ## Implementation Phases
 
-### Phase 1: Glossary tier — ⏳ PLANNED
+### Phase 1: Glossary tier — ✅ COMPLETE
 
 **Objective**: Every term used on 3+ cards has an atomic card that teaches it,
 and those cards are the first thing the scheduler introduces.
 
-Candidate terms are shortlisted mechanically — a bolded term appearing on three
-or more cards, which yields 91 candidates — then curated by hand, because the
-mechanical rule also catches English words ("one", "must", "set") and
-case-collisions ("Kind" the object field vs "KIND" the tool). Expect roughly 60
-real terms. Candidates rejected during curation are recorded with a reason in
-`glossary-candidates.md` alongside this spec, so the judgment is reviewable.
+Candidate terms are shortlisted mechanically — a bolded term occurring as a
+whole word on three or more cards, which yields 67 candidates under the same
+matching rule the Phase 3 lint uses — then curated by hand. The rule catches
+English words ("one", "must", "set") and case-collisions ("Kind" the object
+field vs "KIND" the tool), and it *misses* the most-used terms of all, because
+`Pod` (91 cards) and `kubectl` (45) are never bolded anywhere. Curation
+therefore both rejects and adds; the result is 72 term cards. Every rejection
+and every addition is recorded with a reason in `glossary-candidates.md`
+alongside this spec, so the judgment is reviewable.
 
 Deck files are renumbered so the glossary sorts first. `deck.Load` globs and
 `sort.Strings` the filenames (`internal/deck/deck.go:55-64`) and `Store.Next`
@@ -132,17 +135,17 @@ lost. Only `?deck=` URLs change.
 
 **Tasks**:
 
-- [ ] Add failing tests for `Term`/`Aliases` parsing and uniqueness —
+- [x] Add failing tests for `Term`/`Aliases` parsing and uniqueness —
       `internal/deck/deck_test.go`
-- [ ] Add `Term` and `Aliases` to `Card`, with load-time uniqueness validation
-- [ ] Curate the glossary term list from the 91 mechanical candidates; record
+- [x] Add `Term` and `Aliases` to `Card`, with load-time uniqueness validation
+- [x] Curate the glossary term list from the 91 mechanical candidates; record
       rejections in `glossary-candidates.md`
-- [ ] Author `decks/00-glossary.yaml` — one card per term, ECS anchor first
+- [x] Author `decks/00-glossary.yaml` — one card per term, ECS anchor first
       where one exists, no term defined inside another term's card
-- [ ] Renumber the existing decks to `01-`…`12-` so the glossary sorts first
-- [ ] Split the four control-plane terms out of `m0-control-plane-components`
+- [x] Renumber the existing decks to `01-`…`12-` so the glossary sorts first
+- [x] Split the four control-plane terms out of `m0-control-plane-components`
       into their own glossary cards
-- [ ] Update the card count and deck listing in `README.md` (repo layout,
+- [x] Update the card count and deck listing in `README.md` (repo layout,
       "Drilling the vocabulary") and `docs/curriculum.md` ("The example
       workload")
 
@@ -153,36 +156,36 @@ lost. Only `?deck=` URLs change.
 - `Term`/`Aliases` parsed and validated in `internal/deck/deck.go`
 - `README.md` and `docs/curriculum.md` updated
 
-### Phase 2: Prerequisites and gating — ⏳ PLANNED
+### Phase 2: Prerequisites and gating — ✅ COMPLETE
 
 **Objective**: Cards are introduced only once their prerequisites are mastered,
 and a filtered drill teaches the prerequisites it depends on.
 
 **Tasks**:
 
-- [ ] Add failing tests for `Requires` resolution and cycle detection, using a
+- [x] Add failing tests for `Requires` resolution and cycle detection, using a
       multi-file `fstest.MapFS` for the cross-deck cases —
       `internal/deck/deck_test.go`
-- [ ] Add `Requires` to `Card` with resolution and acyclicity validation
-- [ ] Add a single-file cyclic-requires seed to the fuzz corpus —
+- [x] Add `Requires` to `Card` with resolution and acyclicity validation
+- [x] Add a single-file cyclic-requires seed to the fuzz corpus —
       `internal/deck/fuzz_test.go`
-- [ ] Add failing tests for `WithPrerequisites` transitive closure and ordering
+- [x] Add failing tests for `WithPrerequisites` transitive closure and ordering
       — `internal/deck/glossary_test.go`
-- [ ] Implement `Library.WithPrerequisites`
-- [ ] Add failing tests for gated introduction and `Stats.Locked` —
+- [x] Implement `Library.WithPrerequisites`
+- [x] Add failing tests for gated introduction and `Stats.Locked` —
       `internal/review/review_test.go`
-- [ ] Gate the `fresh` branch of `Store.Next`; add `Store.Mastered` and
+- [x] Gate the `fresh` branch of `Store.Next`; add `Store.Mastered` and
       `Stats.Locked`
-- [ ] Add failing tests that `?module=M0` on a fresh store introduces glossary
+- [x] Add failing tests that `?module=M0` on a fresh store introduces glossary
       cards, and that index deck rows stay unexpanded —
       `internal/web/web_test.go`
-- [ ] Expand the drill scope through `WithPrerequisites` in `Server.next`,
+- [x] Expand the drill scope through `WithPrerequisites` in `Server.next`,
       `handleDrill`, `handleGrade` and `s.view`, leaving the index rows on the
       raw filter; surface the pulled-in term count in the template data
-- [ ] Add `requires:` to every M0 card, and rewrite
+- [x] Add `requires:` to every M0 card, and rewrite
       `m0-control-plane-components` as an enumeration card that requires its
       four parts
-- [ ] Update `docs/curriculum.md` M0 with the vocabulary-first study order
+- [x] Update `docs/curriculum.md` M0 with the vocabulary-first study order
 
 **Deliverables**:
 
@@ -191,7 +194,7 @@ and a filtered drill teaches the prerequisites it depends on.
 - M0 fully re-authored with prerequisite edges
 - `docs/curriculum.md` updated
 
-### Phase 3: Glossary lint — ⏳ PLANNED
+### Phase 3: Glossary lint — ✅ COMPLETE
 
 **Objective**: A card that uses a glossary term without requiring it fails the
 build.
@@ -205,16 +208,16 @@ allowlist entry is part of reaching that module; it is not this spec's work.
 
 **Tasks**:
 
-- [ ] Add the failing lint test over the embedded decks, with fixtures for a
+- [x] Add the failing lint test over the embedded decks, with fixtures for a
       required term, an unrequired term, and a term inside a longer word —
       `internal/deck/glossary_test.go`
-- [ ] Implement `Library.Glossary()` and the check: for each card, every
+- [x] Implement `Library.Glossary()` and the check: for each card, every
       glossary term or alias occurring in `q`/`a` is either required by that
       card or defined by it
-- [ ] Add the per-deck allowlist, with the glossary and M0 excluded from it
-- [ ] Add a `lint-decks` target running just this check —
+- [x] Add the per-deck allowlist, with the glossary and M0 excluded from it
+- [x] Add a `lint-decks` target running just this check —
       `flashcards/Makefile`
-- [ ] Document the allowlist-draining step in `AGENTS.md` under the module
+- [x] Document the allowlist-draining step in `AGENTS.md` under the module
       workflow
 
 **Deliverables**:
@@ -256,7 +259,41 @@ allowlist entry is part of reaching that module; it is not this spec's work.
 
 ## Technical Implementation Details
 
-**To be filled in as the code is written.**
+**Terms are matched case sensitively, as whole words, with `-` counted as a
+word character.** That single rule is shared by the mechanical shortlist and
+the Phase 3 lint, and it is what makes both defensible: `Service` does not
+match inside `ServiceAccount`, `proxy` does not match inside `kube-proxy`, and
+`KIND` the tool stays distinct from `kind` the object field. A case-insensitive
+substring scan produces 109 "candidates", most of them single letters matching
+inside unrelated words.
+
+**Aliases carry the inflections.** Terms match literally, so `Pod` does not
+match `Pods`; each term card lists the forms that actually occur
+(`aliases: [pod, pods, Pods]`). Two aliases were dropped during authoring
+because they produced false positives: `k8s` matched inside
+`rbac.authorization.k8s.io`, and `Kind` was dropped entirely — see
+`glossary-candidates.md`.
+
+**The lint requires direct edges, not transitive ones.** A card using
+"readiness probe" must require both `term-readiness-probe` and `term-probe`,
+even though the former already requires the latter. Direct edges keep the
+failure message actionable and the requires list a readable statement of what
+the card assumes.
+
+**Gating applies to introduction only.** `Store.Next` filters the `fresh`
+branch; a card already in the schedule keeps its reviews even if a prerequisite
+lapses out of `Review` state. Withdrawing something part-learned would strand
+it in the schedule with no way back.
+
+**`Stats.Locked` counts locked cards that are also counted in `New`.** Locked
+is a *reason*, not a separate bucket, so the buckets still sum to `Total`.
+
+**Cram is unexpanded as well as ungated.** `Server.scope` skips
+`WithPrerequisites` when `?cram=1`: gating does not apply there, so pulling in
+terms would only dilute the scope the reviewer asked for.
+
+On a fresh store, `/drill?module=M0` reports "M0 + 47 prerequisite terms",
+introduces `term-cluster` first, and shows 60 of its 69 cards locked.
 
 ### Key Files
 
@@ -300,29 +337,42 @@ The card schema addition:
 
 ## Success Criteria
 
-- [ ] `make lint-decks` fails on a card that uses a glossary term it does not
+- [x] `make lint-decks` fails on a card that uses a glossary term it does not
       require, and passes on the glossary and M0
-- [ ] Every mechanical candidate without a glossary card appears in
+- [x] Every mechanical candidate without a glossary card appears in
       `glossary-candidates.md` with a reason
-- [ ] `?module=M0` on a fresh review store introduces a glossary card, and the
+- [x] `?module=M0` on a fresh review store introduces a glossary card, and the
       scope label names the number of terms pulled in
-- [ ] `m0-only-apiserver-touches-etcd` is not introduced until its four
-      prerequisite terms are in FSRS `Review` state
-- [ ] No glossary or M0 card teaches more than one term;
+- [x] `m0-only-apiserver-touches-etcd` is not introduced until every term it
+      requires is in FSRS `Review` state
+- [x] No glossary or M0 card teaches more than one term;
       `m0-control-plane-components` requires its four parts rather than
       defining them
-- [ ] Index deck row counts sum to the library total — the drill expansion does
+- [x] Index deck row counts sum to the library total — the drill expansion does
       not leak into the inventory
-- [ ] A deck with a cyclic `requires` spanning two files fails `deck.Load` with
+- [x] A deck with a cyclic `requires` spanning two files fails `deck.Load` with
       an error naming the cycle
-- [ ] `make check` passes
+- [x] `make check` passes
 
 ---
 
 ## Troubleshooting Guide
 
-**Not applicable** — no failures encountered yet. Entries get added as they are
-hit.
+**`make lint-decks` fails on a card you did not touch.** Adding a term card
+retroactively puts every existing use of that term under the invariant. Either
+add the `requires:` edge, reword the card to not use the term, or — if the deck
+is not yet drained — confirm it is in the allowlist in
+`internal/deck/glossary_test.go`.
+
+**`requires cycle: a -> b -> a` at startup.** Two glossary cards define each
+other. The fix is to reword one of them rather than to delete the edge: if the
+definitions are genuinely mutually dependent, one of them is not atomic.
+
+**A term card trips the lint on its own definition.** It will not — a card is
+never flagged for the term it defines — but it *is* flagged for other terms it
+mentions. Glossary cards are ordered as a dependency chain for exactly this
+reason; a definition that needs a term defined further down the file is a sign
+the layering is wrong.
 
 ---
 

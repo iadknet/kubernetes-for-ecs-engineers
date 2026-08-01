@@ -1,0 +1,1030 @@
+deck: Glossary — one term, one card
+tags: [glossary, vocabulary]
+
+# Every card here teaches exactly one term, in isolation, leading with its ECS
+# anchor where one exists. Concept cards elsewhere in the library reference
+# these by id in `requires:`, so a concept is never introduced before its
+# vocabulary has been retained. Cards are ordered as a dependency chain: a card
+# may only reference terms defined above it.
+#
+# The `requires:` edges between glossary cards are enforced by the lint in
+# internal/deck/glossary_test.go — if you mention another term in `q` or `a`,
+# you must require it.
+
+cards:
+  # --- Layer 0: no prerequisites ---------------------------------------------
+
+  - id: term-container
+    term: container
+    aliases: [containers, Container, Containers]
+    q: |
+      container
+    a: |
+      A process tree isolated with kernel primitives (cgroups and friends), run
+      from an image that carries its own filesystem.
+    ecs: |
+      Identical to the container in an ECS task definition — same OCI image,
+      same runtime concept. This one word means exactly what you already think
+      it means, which is rarer than you'd hope in this glossary.
+
+  - id: term-kubernetes
+    term: Kubernetes
+    aliases: [K8s]
+    q: |
+      Kubernetes
+    a: |
+      An open-source system that runs containerized workloads across a fleet of
+      machines by continuously driving reality toward a declared target state.
+    ecs: |
+      The category ECS occupies, but portable and extensible: the API is the
+      product, and every part of it — including the scheduler — is a component
+      you can inspect, replace, or extend.
+
+  - id: term-cluster
+    term: cluster
+    aliases: [clusters, Cluster, Clusters]
+    q: |
+      cluster
+    a: |
+      One control plane plus the machines it manages, sharing one API
+      address and one datastore. The unit of administration and, for practical
+      purposes, the unit of failure.
+    ecs: |
+      An ECS cluster is mostly a *label* for grouping tasks in a region. This
+      one is a real running system with its own API server and database — much
+      closer in weight to "an entire ECS control plane of your own".
+
+  - id: term-kubectl
+    term: kubectl
+    q: |
+      kubectl
+    a: |
+      The official command-line client. It is a thin wrapper over the HTTP API:
+      anything it does, you can do with a REST call, and `-v=8` prints exactly
+      which one it made.
+    ecs: |
+      `aws ecs`, except it talks to *your* control plane rather than a regional
+      AWS service, and it reads its credentials from a kubeconfig file instead
+      of an AWS profile.
+
+  - id: term-manifest
+    term: manifest
+    aliases: [manifests, Manifest, Manifests]
+    q: |
+      manifest
+    a: |
+      A YAML or JSON file describing the objects you want to exist. It is
+      version-controlled input, not state: what you submit, not what the system
+      currently holds.
+    ecs: |
+      A task definition JSON, or the CloudFormation/Terraform that produces it.
+      The instinct carries over intact — declare it in a file, don't click it.
+
+  - id: term-label
+    term: label
+    aliases: [labels, Label, Labels]
+    q: |
+      label
+    a: |
+      A key/value pair attached to an object that other objects can *select
+      on*. Labels are how loosely coupled parts of the system find each other.
+    ecs: |
+      ECS tags look similar but are descriptive only — nothing in ECS wires two
+      resources together by tag. Here labels are load-bearing: get one wrong
+      and traffic silently goes nowhere.
+
+  - id: term-annotation
+    term: annotation
+    aliases: [annotations, Annotation, Annotations]
+    q: |
+      annotation
+    a: |
+      Arbitrary non-identifying key/value metadata, for tools and automation
+      to read. You cannot select on it.
+    ecs: |
+      What an ECS tag actually is in practice: descriptive metadata that some
+      tool downstream may or may not care about.
+
+  - id: term-etcd
+    term: etcd
+    q: |
+      etcd
+    a: |
+      The distributed key-value store holding all persisted cluster state. It
+      is consensus-based, so it needs an odd-numbered quorum, and its backup is
+      the whole cluster's backup.
+    requires: [term-cluster]
+    ecs: |
+      **No ECS equivalent you can see.** AWS runs the equivalent database for
+      you and never exposes it. On a self-managed cluster, losing this loses
+      everything — which is why "where are the etcd snapshots?" is a real
+      interview question.
+
+  - id: term-desired-state
+    term: desired state
+    q: |
+      desired state
+    a: |
+      What you asked for: the part of an object you author. It is a standing
+      instruction, not a request that completes.
+    ecs: |
+      The nearest thing is the ECS service definition's desired count — with
+      the crucial difference that here *everything* works this way, not just
+      the replica count.
+
+  - id: term-actual-state
+    term: actual state
+    q: |
+      actual state
+    a: |
+      What is really running right now, as observed and reported back by the
+      components doing the work. Never authored by hand.
+    ecs: |
+      The running-task view in the ECS console. The difference is structural:
+      here it lives in the same object as what you asked for, so the gap
+      between the two is always visible in one place.
+
+  - id: term-spec
+    term: spec
+    aliases: [specs]
+    q: |
+      spec
+    a: |
+      The field on every object holding what you want. Written by you, never by
+      the system.
+    requires: [term-desired-state]
+    ecs: |
+      A task definition has no equivalent split — there is only the definition
+      you submitted, with reality reported somewhere else entirely.
+
+  - id: term-status
+    term: status
+    q: |
+      status
+    a: |
+      The field on every object holding what is actually true, written by the
+      components that manage the object. You read it; you never author it.
+    requires: [term-actual-state]
+    ecs: |
+      Split out from the console's various status columns. Having it inside the
+      object means one `get -o yaml` shows both what you wanted and what
+      happened.
+
+  - id: term-kubeconfig
+    term: kubeconfig
+    q: |
+      kubeconfig
+    a: |
+      The client-side file (default `~/.kube/config`) holding server addresses,
+      credentials, and named contexts. Nothing server-side knows it exists.
+    requires: [term-kubectl, term-cluster]
+    ecs: |
+      `~/.aws/config` plus `~/.aws/credentials`. The failure mode is identical
+      and just as embarrassing: the right command against the wrong cluster.
+
+  - id: term-sigterm
+    term: SIGTERM
+    q: |
+      SIGTERM
+    a: |
+      The signal sent to a process asking it to shut down cleanly. Ignore it
+      and you get SIGKILL after a grace period, mid-request.
+    requires: [term-container]
+    ecs: |
+      Exactly the ECS `StopTask` sequence, including
+      `stopTimeout`. Everything you already know about draining connections
+      before exiting transfers unchanged.
+
+  - id: term-mtls
+    term: mTLS
+    q: |
+      mTLS
+    a: |
+      TLS where *both* sides present certificates, so each end authenticates
+      the other rather than only the client verifying the server.
+    ecs: |
+      What ECS gives you via a service mesh (App Mesh) if you configure it.
+      Here it is also how the core components authenticate to each other by
+      default.
+
+  # --- Layer 1: cluster anatomy ----------------------------------------------
+
+  - id: term-api-server
+    term: API server
+    aliases: [kube-apiserver, apiserver, API Server]
+    q: |
+      API server
+    a: |
+      The cluster's only front door. Every read and write goes through it, it
+      is the only component that talks to the datastore, and it is where
+      authentication, authorization, and validation happen.
+    requires: [term-etcd, term-cluster]
+    ecs: |
+      The ECS control plane API you hit with `aws ecs ...` — except this one is
+      a process you can read logs from, and *everything* in the cluster,
+      including the nodes and your own workloads, authenticates to it.
+
+  - id: term-node
+    term: node
+    aliases: [nodes, Node, Nodes]
+    q: |
+      node
+    a: |
+      A machine — a VM, bare metal, or a Docker container in a local test
+      cluster — that runs workloads. It has finite CPU and memory, and it can fail.
+    requires: [term-cluster, term-container]
+    ecs: |
+      An EC2 container instance. The mindset shift is from **Fargate**: nodes
+      are visible here, and their capacity and health affect your workloads
+      directly even on managed offerings where you don't operate them.
+
+  - id: term-namespace
+    term: Namespace
+    aliases: [namespace, namespaces, Namespaces]
+    q: |
+      Namespace
+    a: |
+      A soft scoping boundary for named resources. It partitions names and is
+      what quotas and access rules attach to. It does **not** isolate compute,
+      and by default does not isolate network traffic.
+    requires: [term-cluster]
+    ecs: |
+      **No ECS equivalent.** The closest ECS gets is "use a separate cluster".
+      Worth deliberate attention precisely because your prior experience gives
+      you no hook for it.
+
+  - id: term-controller
+    term: controller
+    aliases: [controllers, Controller, Controllers]
+    q: |
+      controller
+    a: |
+      A process that watches objects of some type and acts to close the gap
+      between what was asked for and what is true. It never finishes; it
+      converges.
+    requires: [term-desired-state, term-actual-state]
+    ecs: |
+      The ECS service scheduler is one of these, and the only one AWS gives
+      you. Here the pattern is the extension mechanism: you will write your own
+      by M6.
+
+  - id: term-reconciliation
+    term: reconciliation
+    aliases: [reconcile, reconciles, reconciliation loop]
+    q: |
+      reconciliation
+    a: |
+      The core loop: observe, compare against what was asked for, act, repeat
+      — forever, not once. Almost every behaviour that surprises you follows
+      from this.
+    requires: [term-controller, term-desired-state, term-actual-state]
+    ecs: |
+      **No real ECS equivalent — learn this one deliberately.** `aws ecs
+      update-service` is imperative: it executes once and returns. Nothing here
+      "finishes"; delete something a controller owns and it comes back.
+
+  - id: term-pod
+    term: Pod
+    aliases: [pod, pods, Pods]
+    q: |
+      Pod
+    a: |
+      The smallest deployable unit: one or more containers sharing one network
+      stack, one IP, and optionally storage, always scheduled together onto a
+      single machine.
+    requires: [term-container, term-node]
+    ecs: |
+      An ECS task in `awsvpc` mode — same "group of containers, one ENI, one
+      IP" shape. Also just as disposable: it gets replaced, not repaired.
+
+  - id: term-kubelet
+    term: kubelet
+    q: |
+      kubelet
+    a: |
+      The agent on every machine. It watches for work assigned to it, tells the
+      container runtime to start it, runs the health checks, and reports back.
+      It is what makes containers actually exist.
+    requires: [term-node, term-pod, term-api-server, term-container]
+    ecs: |
+      The ECS agent on an EC2 container instance — nearly 1:1, including that
+      when it stops reporting, the control plane marks the machine unhealthy.
+
+  - id: term-selector
+    term: selector
+    aliases: [selectors, label selector, label selectors]
+    q: |
+      selector
+    a: |
+      A query over labels. It is how one object declares which others it acts
+      on, without naming them or owning them.
+    requires: [term-label]
+    ecs: |
+      In ECS you register a service with a target group explicitly. Here the
+      binding is implicit and by label — which is why a typo produces silence
+      rather than an error.
+
+  - id: term-scheduler
+    term: kube-scheduler
+    aliases: [scheduler]
+    q: |
+      kube-scheduler
+    a: |
+      The component that assigns each unassigned workload to a machine, by
+      filtering out ones that can't take it and scoring the rest. It only picks
+      the placement — something else does the starting.
+    requires: [term-pod, term-node, term-api-server]
+    ecs: |
+      ECS has this too and never shows it to you; there is no
+      `aws ecs get-scheduler`. Here it is a process whose logs explain exactly
+      why nothing was placed.
+
+  - id: term-kube-controller-manager
+    term: kube-controller-manager
+    q: |
+      kube-controller-manager
+    a: |
+      The single binary hosting the built-in controllers — the ones keeping
+      copies at the requested count, tracking service backends, and managing
+      machine lifecycle.
+    requires: [term-controller]
+    ecs: |
+      The invisible AWS machinery behind every ECS behaviour that "just
+      happens", packaged as one inspectable process you can read logs from.
+
+  - id: term-cri
+    term: CRI
+    q: |
+      CRI
+    a: |
+      Container Runtime Interface: the gRPC contract between the node agent and
+      whatever actually runs containers (containerd, CRI-O). It is why the
+      runtime is swappable.
+    requires: [term-container, term-kubelet, term-node]
+    ecs: |
+      ECS hardwires this to Docker/containerd and gives you no say. The
+      pluggability is the point: the same cluster runs on a different runtime
+      without any workload noticing.
+
+  - id: term-cni
+    term: CNI
+    q: |
+      CNI
+    a: |
+      Container Network Interface: the plugin contract for giving every
+      workload an IP and routing traffic between machines without NAT. Calico
+      and Cilium implement it.
+    requires: [term-pod, term-node, term-container]
+    ecs: |
+      `awsvpc` mode giving each task an ENI and a VPC IP. On EKS the AWS VPC
+      CNI does literally this — real VPC IPs, and therefore real per-node IP
+      limits that cap density.
+
+  # --- Layer 2: workloads ----------------------------------------------------
+
+  - id: term-replica
+    term: replica
+    aliases: [replicas, Replica, Replicas]
+    q: |
+      replica
+    a: |
+      One interchangeable copy of a workload. Scaling means changing how many
+      you want; which specific copies exist is not your concern.
+    requires: [term-pod]
+    ecs: |
+      The desired count on an ECS service. The number means the same thing;
+      the difference is that a controller here holds it as a standing target
+      rather than as the result of your last API call.
+
+  - id: term-replicaset
+    term: ReplicaSet
+    aliases: [ReplicaSets]
+    q: |
+      ReplicaSet
+    a: |
+      The controller that keeps exactly N copies of one fixed template
+      running. You rarely create one directly — something else manages it for
+      you.
+    requires: [term-replica, term-controller, term-pod]
+    ecs: |
+      Half of an ECS service: the "keep N of exactly this running" half, with
+      the deployment logic split out into a separate object above it.
+
+  - id: term-deployment
+    term: Deployment
+    aliases: [Deployments, deployment, deployments]
+    q: |
+      Deployment
+    a: |
+      The object you actually author for a stateless workload. It owns
+      versioned ReplicaSets and moves copies between them to change versions
+      safely.
+    requires: [term-replicaset, term-pod]
+    ecs: |
+      An ECS service, split in two. The version history is the part ECS
+      doesn't have: old ReplicaSets stick around at zero, which is what makes
+      rollback instant.
+
+  - id: term-rollout
+    term: rollout
+    aliases: [rollouts]
+    q: |
+      rollout
+    a: |
+      The controlled transition from one version of a workload to another, one
+      that you can watch, pause, and undo.
+    requires: [term-deployment]
+    ecs: |
+      An ECS service deployment, including the circuit-breaker idea. The
+      difference is that the previous version's definition is still a live
+      object, so undoing is a command rather than a re-deploy.
+
+  - id: term-rolling-update
+    term: rolling update
+    aliases: [rolling updates]
+    q: |
+      rolling update
+    a: |
+      The default rollout strategy: add some new copies, remove some old ones,
+      repeat, bounded by how many may be unavailable and how many extra may
+      exist at once.
+    requires: [term-rollout, term-replica]
+    ecs: |
+      `minimumHealthyPercent` and `maximumPercent` on an ECS service — the same
+      two dials, named `maxUnavailable` and `maxSurge`.
+
+  - id: term-daemonset
+    term: DaemonSet
+    aliases: [DaemonSets]
+    q: |
+      DaemonSet
+    a: |
+      Runs exactly one copy of something on every machine (or every machine
+      matching a selector), including machines that join later. Log shippers
+      and network agents ship this way.
+    requires: [term-node, term-pod, term-selector]
+    ecs: |
+      An ECS service with the `DAEMON` scheduling strategy. Same idea, and the
+      same use cases.
+
+  - id: term-statefulset
+    term: StatefulSet
+    aliases: [StatefulSets]
+    q: |
+      StatefulSet
+    a: |
+      For workloads whose copies are *not* interchangeable: stable ordinal
+      names, stable per-copy storage, and ordered startup and shutdown.
+    requires: [term-pod, term-replica]
+    ecs: |
+      **No ECS equivalent.** ECS tasks are anonymous and interchangeable by
+      design; anything needing stable identity gets built around ECS, not in
+      it.
+
+  - id: term-job
+    term: Job
+    aliases: [Jobs]
+    q: |
+      Job
+    a: |
+      Runs work to completion rather than forever: it retries failures up to a
+      limit and then stops, leaving its record behind for inspection.
+    requires: [term-pod]
+    ecs: |
+      `aws ecs run-task` for a batch container, plus the retry and completion
+      bookkeeping you would otherwise have written yourself in Step Functions.
+
+  - id: term-sidecar
+    term: sidecar
+    aliases: [sidecars, Sidecar, Sidecars]
+    q: |
+      sidecar
+    a: |
+      A helper container beside the main one in the same unit, sharing its
+      network and lifecycle — a proxy, a log shipper, a credential refresher.
+    requires: [term-container, term-pod]
+    ecs: |
+      Exactly the ECS sidecar pattern, down to the shared network namespace.
+      The one addition worth knowing is that a sidecar can be declared to start
+      before, and stop after, the main container.
+
+  # --- Layer 3: networking ---------------------------------------------------
+
+  - id: term-service
+    term: Service
+    aliases: [Services]
+    q: |
+      Service
+    a: |
+      A stable name and virtual IP in front of a changing set of workload
+      copies, chosen by selector. Clients talk to it and never track individual
+      copies.
+    requires: [term-pod, term-selector]
+    ecs: |
+      A target group plus its load balancer listener, minus the load balancer
+      bill. Basic east-west balancing is in-kernel and free here.
+
+  - id: term-endpoint
+    term: endpoint
+    aliases: [endpoints, Endpoint, Endpoints]
+    q: |
+      endpoint
+    a: |
+      One backing address behind a Service. The set is maintained
+      automatically, and only copies that are passing their health checks are
+      in it.
+    requires: [term-service, term-pod]
+    ecs: |
+      A registered target in a target group. Same "healthy targets only" rule
+      — which is why a health check that never passes shows up as an empty
+      backend rather than as an error.
+
+  - id: term-clusterip
+    term: ClusterIP
+    q: |
+      ClusterIP
+    a: |
+      The default Service type: a virtual IP reachable only from inside the
+      cluster. Nothing outside can route to it.
+    requires: [term-service, term-cluster]
+    ecs: |
+      An internal ALB/NLB, without the provisioning or the hourly cost. Being
+      the default is the important part — exposure is opt-in here.
+
+  - id: term-kube-proxy
+    term: kube-proxy
+    q: |
+      kube-proxy
+    a: |
+      The per-machine component that programs kernel rules (iptables or IPVS)
+      so traffic to a Service's virtual IP is balanced across its healthy
+      backends. There is no proxy process in the data path.
+    requires: [term-service, term-endpoint, term-node]
+    ecs: |
+      ECS hands this to a load balancer you provision and pay for. Here it is
+      kernel rules with no health-check configuration of its own — the
+      workload's own readiness check decides the pool.
+
+  - id: term-coredns
+    term: CoreDNS
+    q: |
+      CoreDNS
+    a: |
+      The in-cluster DNS server. Every Service gets
+      `<name>.<namespace>.svc.cluster.local`, and within a namespace the short
+      name resolves — service discovery with no client-side registry.
+    requires: [term-service, term-namespace, term-cluster]
+    ecs: |
+      Closer to **ECS Service Connect** than to Cloud Map: automatic and on by
+      default for everything, rather than an opt-in registration per service.
+
+  - id: term-ingress
+    term: Ingress
+    q: |
+      Ingress
+    a: |
+      HTTP routing from outside the cluster to Services, by host and path. The
+      object is just the rules; a controller you install turns them into a real
+      proxy.
+    requires: [term-service, term-controller, term-cluster]
+    ecs: |
+      An ALB with listener rules. The split is the new part: the routing intent
+      is portable, and which proxy implements it is a separate decision.
+
+  - id: term-networkpolicy
+    term: NetworkPolicy
+    aliases: [NetworkPolicies]
+    q: |
+      NetworkPolicy
+    a: |
+      Firewall rules expressed over labels rather than IPs. With none, all
+      traffic is allowed; add one to a workload and everything not permitted is
+      denied.
+    requires: [term-pod, term-label, term-namespace]
+    ecs: |
+      Security groups, but selected by label and enforced by the network
+      plugin — so a plugin that doesn't implement them accepts your rules and
+      silently enforces nothing.
+
+  # --- Layer 4: configuration and identity ------------------------------------
+
+  - id: term-configmap
+    term: ConfigMap
+    aliases: [ConfigMaps]
+    q: |
+      ConfigMap
+    a: |
+      Non-secret configuration as an object: key/value pairs or whole files,
+      injected as environment variables or mounted as a volume.
+    requires: [term-pod, term-volume]
+    ecs: |
+      The environment block in a task definition, or files fetched at start-up
+      — except this is a separate object with its own lifecycle, so config can
+      change without editing the workload.
+
+  - id: term-secret
+    term: Secret
+    aliases: [Secrets]
+    q: |
+      Secret
+    a: |
+      The same shape as a ConfigMap, flagged as sensitive — but base64 is not
+      encryption. Without encryption at rest and tight access rules, it is
+      config with a warning sticker.
+    requires: [term-configmap]
+    ecs: |
+      A Secrets Manager or SSM Parameter Store reference in a task definition,
+      where AWS handles the encryption and the access policy. Here both are
+      *your* job, which is the whole point of the M2 exercise.
+
+  - id: term-volume
+    term: volume
+    aliases: [volumes, Volume, Volumes]
+    q: |
+      volume
+    a: |
+      A directory made available to containers, with a lifetime tied to
+      something other than the container — the Pod, or an external disk that
+      outlives everything.
+    requires: [term-container, term-pod]
+    ecs: |
+      An ECS volume mount. The bind-mount and EFS cases both map over; what's
+      new is that the durable case is a first-class object you request rather
+      than infrastructure you wire up.
+
+  - id: term-pvc
+    term: PersistentVolumeClaim
+    aliases: [PersistentVolumeClaims, PVC, PVCs]
+    q: |
+      PersistentVolumeClaim
+    a: |
+      A request for durable storage of a given size and access mode. You ask
+      for what you need; something else provisions the real disk and binds it.
+    requires: [term-volume, term-pod]
+    ecs: |
+      Creating an EBS volume and attaching it — with the provisioning inverted.
+      You never name a disk; you describe the storage you want and it appears.
+
+  - id: term-serviceaccount
+    term: ServiceAccount
+    aliases: [ServiceAccounts]
+    q: |
+      ServiceAccount
+    a: |
+      The in-cluster identity a workload runs as. It is what the API server
+      authenticates when your code calls it, and what authorization rules are
+      granted to.
+    requires: [term-pod, term-api-server]
+    ecs: |
+      The ECS **task role** — the identity the container itself gets, distinct
+      from the execution role. Same split, and the same mistake available: over
+      granting it because it was easier than scoping it.
+
+  - id: term-rbac
+    term: RBAC
+    q: |
+      RBAC
+    a: |
+      Role-Based Access Control: the authorization system on the API server.
+      Rules grant verbs on resource types; bindings attach those rules to an
+      identity. Deny by default, and no deny rules at all.
+    requires: [term-api-server]
+    ecs: |
+      IAM policies, with a much smaller model: no explicit `Deny`, no
+      conditions, no resource ARNs — just verbs, kinds, and optionally named
+      objects, scoped to a namespace or the whole cluster.
+
+  - id: term-role
+    term: Role
+    aliases: [Roles]
+    q: |
+      Role
+    a: |
+      A namespaced set of permission rules: these verbs, on these resource
+      types, in this namespace. It grants nothing until something binds it to
+      an identity.
+    requires: [term-rbac, term-namespace]
+    ecs: |
+      An IAM policy document — the permissions themselves, separate from who
+      holds them. The namespace scope is what IAM has no equivalent of.
+
+  - id: term-rolebinding
+    term: RoleBinding
+    aliases: [RoleBindings]
+    q: |
+      RoleBinding
+    a: |
+      Attaches a set of permission rules to identities inside one namespace.
+      The binding is the grant; without it the rules do nothing.
+    requires: [term-role, term-serviceaccount, term-namespace]
+    ecs: |
+      Attaching an IAM policy to a role. The separation is stricter here, and
+      the binding is itself an object you can audit and revoke on its own.
+
+  - id: term-clusterrole
+    term: ClusterRole
+    aliases: [ClusterRoles]
+    q: |
+      ClusterRole
+    a: |
+      The same permission rules, defined once for the whole cluster. It can
+      cover cluster-scoped resources, and can also be reused inside a single
+      namespace by binding it there.
+    requires: [term-role, term-cluster, term-namespace]
+    ecs: |
+      No real analogue — IAM has no namespace dimension to be "cluster-wide"
+      relative to. The reuse pattern is the part worth remembering.
+
+  - id: term-clusterrolebinding
+    term: ClusterRoleBinding
+    aliases: [ClusterRoleBindings]
+    q: |
+      ClusterRoleBinding
+    a: |
+      Grants a set of cluster-wide rules everywhere, in every namespace. It is
+      the object most often reached for by accident and most often flagged in
+      review.
+    requires: [term-clusterrole, term-rolebinding, term-cluster, term-namespace]
+    ecs: |
+      Attaching a policy at the account level rather than to one role. Same
+      blast radius, and the same reason to justify it in writing.
+
+  # --- Layer 5: health, scheduling, and disruption ----------------------------
+
+  - id: term-probe
+    term: probe
+    aliases: [probes, Probe, Probes]
+    q: |
+      probe
+    a: |
+      A periodic check the node agent runs against a container — HTTP, TCP, or
+      a command. What failing means depends on which kind of probe it is.
+    requires: [term-container, term-kubelet, term-node]
+    ecs: |
+      An ECS container health check. The difference that matters: there is more
+      than one kind here, they mean different things, and using one where you
+      needed another is a classic outage.
+
+  - id: term-readiness-probe
+    term: readiness probe
+    aliases: [readiness probes, readiness]
+    q: |
+      readiness probe
+    a: |
+      Answers "should this receive traffic right now?". Failing removes it from
+      the Service backends and nothing restarts — the correct check for a
+      dependency that is temporarily unavailable.
+    requires: [term-probe, term-endpoint, term-service]
+    ecs: |
+      The health check the ALB target group runs, as opposed to the container
+      health check. Here both are properties of the workload rather than of
+      separate infrastructure.
+
+  - id: term-taint
+    term: taint
+    aliases: [taints, tainted]
+    q: |
+      taint
+    a: |
+      A mark on a machine repelling work that does not explicitly tolerate it —
+      the mechanism behind "this hardware is reserved" and behind cordoning a
+      machine off for maintenance.
+    requires: [term-node, term-pod]
+    ecs: |
+      Placement constraints, inverted. ECS constraints are stated by the task;
+      a taint is stated by the machine, so one change protects a machine from
+      everything at once.
+
+  - id: term-affinity
+    term: affinity
+    aliases: [Affinity, anti-affinity]
+    q: |
+      affinity
+    a: |
+      Rules pulling work toward, or pushing it away from, particular machines
+      or particular neighbours. Anti-affinity across failure domains is what
+      stops every copy landing in one place.
+    requires: [term-node, term-pod, term-label]
+    ecs: |
+      ECS placement constraints and `spread` strategies. Same purpose, a richer
+      vocabulary, and the same rule: an unsatisfiable hard rule means nothing
+      gets placed at all.
+
+  - id: term-eviction
+    term: eviction
+    aliases: [evicted, evict, evictions]
+    q: |
+      eviction
+    a: |
+      Removing a running workload from a machine deliberately — because the
+      machine is out of resources, or because a human asked for the machine to
+      be emptied.
+    requires: [term-pod, term-node]
+    ecs: |
+      ECS stops tasks for capacity reasons too, but silently. Here it is a
+      distinct, observable event, and one you can constrain.
+
+  - id: term-drain
+    term: drain
+    aliases: [drained, draining, cordon]
+    q: |
+      drain
+    a: |
+      Emptying a machine of workloads so it can be upgraded or removed, marking
+      it unschedulable first so nothing new lands on it.
+    requires: [term-node, term-eviction]
+    ecs: |
+      Setting a container instance to `DRAINING`. Near-identical concept — and
+      the same operation that quietly reveals whether the workload actually
+      tolerates being moved.
+
+  - id: term-pdb
+    term: PodDisruptionBudget
+    aliases: [PodDisruptionBudgets, PDB, PDBs]
+    q: |
+      PodDisruptionBudget
+    a: |
+      A floor on availability during voluntary disruption: at most this many
+      copies may be taken down at once, so draining a machine blocks rather
+      than breaking the workload.
+    requires: [term-eviction, term-drain, term-replica]
+    ecs: |
+      **No ECS equivalent.** ECS has no way to tell the platform "you may not
+      take a third one from me right now". Missing one is a standard finding in
+      a production-readiness review.
+
+  - id: term-hpa
+    term: HorizontalPodAutoscaler
+    aliases: [HPA, HPAs]
+    q: |
+      HorizontalPodAutoscaler
+    a: |
+      Adjusts how many copies exist based on observed metrics, most often CPU.
+      It needs a metrics source installed, and it fights anything else editing
+      the same count.
+    requires: [term-replica, term-deployment]
+    ecs: |
+      ECS Service Auto Scaling with a target-tracking policy. The gotcha is
+      new: the count is a field others may also write, so a stale manifest can
+      undo the autoscaler on every apply.
+
+  - id: term-metrics-server
+    term: metrics-server
+    q: |
+      metrics-server
+    a: |
+      The lightweight component supplying current CPU and memory readings for
+      workloads and machines. Nothing is installed by default, so
+      `kubectl top` and autoscaling both fail until it is.
+    requires: [term-node, term-pod, term-hpa, term-kubectl]
+    ecs: |
+      CloudWatch metrics being there automatically. Here basic resource metrics
+      are an add-on you install and operate — a genuine surprise coming from
+      AWS.
+
+  # --- Layer 6: extension and tooling -----------------------------------------
+
+  - id: term-event
+    term: Event
+    aliases: [Events]
+    q: |
+      Event
+    a: |
+      A short-lived record of something that happened to an object — scheduling
+      failures, image pull errors, probe failures, restarts. It expires within
+      roughly an hour and is not a log.
+    requires: [term-api-server, term-probe]
+    ecs: |
+      The ECS console's Events tab on a service, which you already reach for
+      when a task won't start. Same instinct; the catch is the expiry, which
+      makes them useless for postmortems unless you ship them somewhere.
+
+  - id: term-crd
+    term: CustomResourceDefinition
+    aliases: [CustomResourceDefinitions, CRD, CRDs]
+    q: |
+      CustomResourceDefinition
+    a: |
+      Registers a new object type with the API server, giving it a schema and
+      its own REST paths. From then on it behaves like a built-in type —
+      same tooling, same access control.
+    requires: [term-api-server, term-rbac]
+    ecs: |
+      **No ECS equivalent whatsoever.** You cannot add a type to the ECS API.
+      This is the single biggest structural difference between the two
+      platforms, and the basis of the entire operator ecosystem.
+
+  - id: term-custom-resource
+    term: custom resource
+    aliases: [custom resources, Custom Resource, Custom Resources]
+    q: |
+      custom resource
+    a: |
+      An instance of a type added by a CustomResourceDefinition. Storing one
+      changes nothing on its own — it is inert data until a controller acts on
+      it.
+    requires: [term-crd, term-controller]
+    ecs: |
+      The closest thing is a row in your own DynamoDB table that your own
+      daemon polls. Here the storage, the schema, the validation, and the
+      access control come for free.
+
+  - id: term-operator
+    term: operator
+    aliases: [operators, Operator, Operators]
+    q: |
+      operator
+    a: |
+      A controller plus the custom types it acts on, packaging operational
+      knowledge about one piece of software as software. It is a pattern, not
+      an API object.
+    requires: [term-controller, term-crd, term-custom-resource]
+    ecs: |
+      The runbook you would otherwise write in Confluence and execute by hand,
+      or a Lambda someone wired to an EventBridge rule. Here it is the
+      idiomatic answer rather than a workaround.
+
+  - id: term-client-go
+    term: client-go
+    q: |
+      client-go
+    a: |
+      The official Go client library for the API. It is the same library the
+      built-in components use, so anything they do is available to your own
+      code.
+    requires: [term-api-server]
+    ecs: |
+      The AWS SDK for Go. The difference: the SDK is a client to a service you
+      do not run, while this is a client to the same API the platform itself is
+      built on.
+
+  - id: term-informer
+    term: informer
+    aliases: [informers, Informer, Informers]
+    q: |
+      informer
+    a: |
+      A client-side cache kept current by a watch, so a controller reads from
+      local memory instead of polling. Using one is the difference between a
+      controller that scales and one that overloads the API server.
+    requires: [term-client-go, term-api-server, term-controller]
+    ecs: |
+      **No ECS equivalent — ECS gives you no watch API at all.** Everything
+      there is polling with backoff. The push-based cache is a genuinely new
+      tool to learn.
+
+  - id: term-webhook
+    term: webhook
+    aliases: [webhooks, Webhook, Webhooks]
+    q: |
+      webhook
+    a: |
+      An HTTPS callback the API server makes while handling a write, to
+      validate or modify the object before it is stored. Yours, in the critical
+      path of every matching request.
+    requires: [term-api-server]
+    ecs: |
+      **No ECS equivalent.** Nothing lets you intervene in an ECS API call.
+      The power comes with the obvious risk: a slow or broken one can stop
+      writes cluster-wide, which is why failure policy and timeouts matter.
+
+  - id: term-helm
+    term: Helm
+    aliases: [helm]
+    q: |
+      Helm
+    a: |
+      The de facto package manager: it templates manifests, tracks each install
+      as a named release with a revision history, and can roll one back.
+    requires: [term-manifest]
+    ecs: |
+      CloudFormation stacks, roughly — templated input, named deployed unit,
+      revision history, rollback. The templating is textual rather than
+      structural, which is its most-criticised property.
+
+  - id: term-chart
+    term: chart
+    aliases: [charts, Chart, Charts]
+    q: |
+      chart
+    a: |
+      A Helm package: templates plus a defaults file, versioned and
+      redistributable. Installing one with different values is how the same
+      software gets deployed to different environments.
+    requires: [term-helm, term-manifest]
+    ecs: |
+      A CloudFormation template with parameters, published to be reused. The
+      public ecosystem of them is much larger than anything in the ECS world.
+
+  - id: term-kind-tool
+    term: KIND
+    q: |
+      KIND
+    a: |
+      Kubernetes IN Docker: each machine in the cluster is a Docker container,
+      so a laptop can host a realistic multi-machine cluster.
+    requires: [term-cluster, term-node, term-container, term-kubernetes]
+    ecs: |
+      There is no local ECS. That absence is why this program can be entirely
+      hands-on with no AWS account — and the reason to take multi-node setups
+      seriously rather than testing on one.

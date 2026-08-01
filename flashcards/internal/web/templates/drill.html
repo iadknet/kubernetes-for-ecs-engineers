@@ -1,6 +1,7 @@
 {{template "head" "Drill"}}
 
-<p class="muted small">Scope: <strong>{{.Filter.Label}}</strong> ·
+<p class="muted small">Scope: <strong>{{.Filter.Label}}</strong>{{if .Terms}}
+  + {{.Terms}} prerequisite term{{if ne .Terms 1}}s{{end}}{{end}} ·
   <a href="/">change</a>{{if not .Filter.Cram}} ·
   <a href="/drill?cram=1">cram mode</a>{{end}}</p>
 

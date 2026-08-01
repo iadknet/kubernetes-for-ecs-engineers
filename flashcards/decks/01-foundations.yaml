@@ -1,0 +1,444 @@
+deck: Foundations — cluster anatomy and the API model
+module: M0
+tags: [foundations]
+
+# Every card here requires the glossary terms it uses, so none is introduced
+# before its vocabulary has been retained. The invariant is enforced by
+# internal/deck/glossary_test.go: mention a term in `q` or `a` without
+# requiring it and the build fails.
+#
+# These cards teach *consequences*. The definitions themselves live in
+# 00-glossary.yaml, one term per card.
+
+cards:
+  - id: m0-control-plane-components
+    q: |
+      Name the four control-plane components.
+    a: |
+      - kube-apiserver
+      - etcd
+      - kube-scheduler
+      - kube-controller-manager
+
+      What each one does is a separate card apiece — this one is the
+      enumeration, nothing more.
+    requires:
+      [
+        term-api-server,
+        term-etcd,
+        term-scheduler,
+        term-kube-controller-manager,
+      ]
+    ecs: |
+      ECS has all four and AWS never shows you any of them. There is no
+      `aws ecs get-scheduler`. Here they are ordinary processes — on a local
+      cluster they run as workloads you can read logs from.
+    tags: [control-plane, architecture]
+
+  - id: m0-only-apiserver-touches-etcd
+    q: |
+      Which components may read and write etcd directly?
+    a: |
+      Only the API server. Everything else — the scheduler, the controllers,
+      every node agent, your own code — goes through it.
+
+      This is why RBAC on the API server is a real security boundary, and why
+      "talk to the Kubernetes API" always means "talk to kube-apiserver".
+    requires:
+      [
+        term-api-server,
+        term-etcd,
+        term-scheduler,
+        term-controller,
+        term-kubelet,
+        term-rbac,
+        term-kubernetes,
+        term-node,
+      ]
+    tags: [control-plane, etcd, security]
+
+  - id: m0-kubelet-is-the-thing-that-acts
+    q: |
+      The API server records that a workload should run on a machine. What
+      actually makes that happen?
+    a: |
+      The kubelet on that machine notices the assignment, calls the container
+      runtime over CRI, and reports back.
+
+      Nothing pushes work to it. It pulls, which is why a machine whose agent
+      is wedged looks healthy from the outside right up until you check what is
+      actually running on it.
+    requires:
+      [term-kubelet, term-api-server, term-container, term-cri, term-node]
+    ecs: |
+      The ECS agent on an EC2 container instance, near enough 1:1 — including
+      that when it stops reporting, the control plane marks the machine
+      unhealthy rather than noticing the workload is gone.
+    tags: [node, kubelet, architecture]
+
+  - id: m0-reconciliation-loop
+    q: |
+      Why does deleting a Pod that a Deployment owns not remove it?
+    a: |
+      Because reconciliation never stops. Deleting the copy changes the actual
+      state, not the desired state, so the controller sees a shortfall and
+      makes another one.
+
+      To actually remove it you change what was asked for — scale to zero, or
+      delete the owner.
+    requires:
+      [
+        term-reconciliation,
+        term-controller,
+        term-desired-state,
+        term-actual-state,
+        term-pod,
+        term-deployment,
+      ]
+    ecs: |
+      **No real ECS equivalent — this one is genuinely new.**
+      `aws ecs update-service` is an imperative call: it executes once and
+      returns. Nothing here "finishes"; it converges. Almost everything else in
+      Kubernetes follows from this one property.
+    tags: [reconciliation, mental-model, no-ecs-equivalent]
+
+  - id: m0-declarative-vs-imperative
+    q: |
+      `kubectl apply -f` vs `kubectl create -f` — what is the real difference?
+    a: |
+      `create` fails if the object already exists. `apply` is declarative: it
+      records what you submitted (in an annotation, or server-side) and
+      computes a patch, so re-running it is idempotent.
+
+      `apply` is the one real workflows use; the imperative verbs are for quick
+      exploration.
+    requires: [term-kubectl, term-annotation, term-manifest]
+    ecs: |
+      Imperative kubectl ≈ ad-hoc `aws ecs` CLI calls. `apply` against
+      version-controlled YAML ≈ managing ECS through
+      CloudFormation/CDK/Terraform. Same instinct you already have: declare it,
+      don't click it.
+    tags: [kubectl, declarative]
+
+  - id: m0-object-shape
+    q: |
+      Every object has the same four top-level fields you author. Name them,
+      plus the one you never author.
+    a: |
+      - `apiVersion` — which API group and version
+      - `kind` — the type
+      - `metadata` — name, namespace, labels, annotations
+      - `spec` — what you want
+
+      Plus `status`, written by whatever manages the object. Authoring it is
+      meaningless: it gets overwritten.
+    requires:
+      [term-spec, term-status, term-namespace, term-label, term-annotation]
+    ecs: |
+      A task definition JSON has no equivalent split. This divide is the
+      reconciliation loop made visible in the data model: one half is your
+      request, the other is reality.
+    tags: [api, spec-status]
+
+  - id: m0-nodes-are-visible-here
+    q: |
+      Coming from Fargate, what changes about machines when you move to
+      Kubernetes?
+    a: |
+      They stop being invisible. A node has a name, finite capacity, a status
+      you can read, and conditions like `MemoryPressure` that explain why
+      nothing will schedule onto it.
+
+      Even on a managed offering where you don't operate them, you reason about
+      them during incidents.
+    requires: [term-node, term-kubernetes, term-status, term-scheduler]
+    ecs: |
+      An EC2-backed ECS cluster gives you the same visibility; Fargate takes it
+      away. The move here is back toward the EC2 mental model, whether or not
+      anyone hands you SSH access.
+    tags: [node, architecture]
+
+  - id: m0-kubeconfig-context
+    q: |
+      What does a kubeconfig **context** bundle together?
+    a: |
+      A (cluster, user, namespace) triple. Switching context re-points kubectl
+      at a different cluster, a different identity, or both.
+
+          kubectl config get-contexts
+          kubectl config use-context kind-k8s-training
+    requires: [term-kubeconfig, term-cluster, term-namespace, term-kubectl]
+    ecs: |
+      An AWS named profile plus a region. `use-context` ≈ `export AWS_PROFILE`.
+      The failure mode is identical and just as embarrassing: the right command
+      against the wrong cluster.
+    tags: [kubectl, kubeconfig]
+
+  - id: m0-what-a-namespace-does-not-isolate
+    q: |
+      What does a Namespace **not** isolate?
+    a: |
+      Compute, and — by default — network traffic. Workloads in different
+      namespaces can reach each other freely unless a NetworkPolicy says
+      otherwise.
+
+      It partitions names and gives quotas and RBAC something to attach to.
+      That is all.
+    requires: [term-namespace, term-networkpolicy, term-rbac, term-pod]
+    ecs: |
+      **No ECS equivalent.** The closest ECS gets is "use a separate cluster".
+      The dangerous part is that it *looks* like a tenancy boundary and is not
+      one until you add policy.
+    tags: [namespace, no-ecs-equivalent, multi-tenancy]
+
+  - id: m0-labels-vs-annotations
+    q: |
+      Labels vs annotations — what is the distinction that matters?
+    a: |
+      You can select on a label. You cannot select on an annotation.
+
+      That is the whole difference, and it decides everything else: if some
+      other object needs to *find* this one, the metadata has to be a label.
+    requires: [term-label, term-annotation, term-selector]
+    ecs: |
+      ECS tags behave like annotations — descriptive, never functional.
+      Nothing in ECS wires two resources together by tag.
+    tags: [labels, selectors]
+
+  - id: m0-label-selector
+    q: |
+      How does a Service decide which Pods to send traffic to, and what breaks
+      when you typo the selector?
+    a: |
+      By matching labels. Any Pod in the namespace with matching labels that is
+      passing its readiness probe becomes an endpoint — regardless of what
+      created it, or whether anything did.
+
+      Typo the selector and you get a Service with zero endpoints, no error,
+      and connection timeouts.
+    requires:
+      [
+        term-service,
+        term-pod,
+        term-label,
+        term-selector,
+        term-endpoint,
+        term-readiness-probe,
+        term-probe,
+        term-namespace,
+      ]
+    ecs: |
+      In ECS you register a service with a target group explicitly. Here the
+      binding is implicit and by label, so the failure is silent rather than an
+      API error.
+    tags: [labels, selectors, service, gotcha]
+
+  - id: m0-namespaced-vs-cluster-scoped
+    q: |
+      What is the difference between a namespaced and a cluster-scoped
+      resource? Two examples of each.
+    a: |
+      Namespaced objects live inside a Namespace: Pod, Deployment, Service,
+      Secret, Role.
+
+      Cluster-scoped objects do not: node, Namespace itself, ClusterRole,
+      CustomResourceDefinition.
+
+          kubectl api-resources --namespaced=false
+    requires:
+      [
+        term-namespace,
+        term-cluster,
+        term-pod,
+        term-deployment,
+        term-service,
+        term-secret,
+        term-role,
+        term-clusterrole,
+        term-node,
+        term-crd,
+        term-kubectl,
+      ]
+    tags: [api, namespace]
+
+  - id: m0-kube-system
+    q: |
+      What lives in the `kube-system` namespace, and why does that matter?
+    a: |
+      The cluster's own machinery, running as ordinary workloads: CoreDNS,
+      kube-proxy, the CNI plugin, and on self-hosted clusters the control-plane
+      components too.
+
+      Kubernetes runs itself on itself — so the same debugging tools work on
+      the platform as on your own code.
+    requires:
+      [
+        term-namespace,
+        term-cluster,
+        term-coredns,
+        term-kube-proxy,
+        term-cni,
+        term-kubernetes,
+        term-pod,
+      ]
+    ecs: |
+      ECS's equivalent machinery is invisible AWS infrastructure. Here you can
+      read the scheduler's logs — genuinely useful when nothing will place.
+    tags: [architecture, kube-system]
+
+  - id: m0-service-dns-name
+    q: |
+      What DNS name does a Service get, and what does that replace?
+    a: |
+      `<service>.<namespace>.svc.cluster.local`, resolvable from anywhere in
+      the cluster. Within the same namespace the short name works.
+
+      It replaces client-side service discovery entirely: no registry library,
+      no sidecar required, nothing to register.
+    requires:
+      [term-coredns, term-service, term-namespace, term-cluster, term-sidecar]
+    ecs: |
+      Closer to **ECS Service Connect** than to Cloud Map: automatic and on by
+      default for every Service, not an opt-in registration per service.
+    tags: [dns, networking, service-discovery]
+
+  - id: m0-kube-proxy-has-no-health-checks
+    q: |
+      kube-proxy load-balances Service traffic. Where are its health checks
+      configured?
+    a: |
+      Nowhere — it has none. It programs kernel rules across whatever the
+      endpoint set currently contains, and the readiness probe is what decides
+      membership.
+
+      There is no proxy process in the data path, and nothing to tune.
+    requires:
+      [
+        term-kube-proxy,
+        term-service,
+        term-endpoint,
+        term-readiness-probe,
+        term-probe,
+      ]
+    ecs: |
+      ECS hands this to an ALB or NLB you provision, pay for, and configure
+      health checks on. Here east-west balancing is in-kernel and free, and the
+      only dial is the workload's own readiness.
+    tags: [networking, kube-proxy, service]
+
+  - id: m0-flat-network-model
+    q: |
+      What network model does Kubernetes require every CNI plugin to
+      implement?
+    a: |
+      Every Pod gets its own IP, and every Pod can reach every other Pod
+      directly, across machines, without NAT.
+
+      It is a requirement, not a feature of any one plugin — which is why
+      workloads move between clusters running Calico, Cilium, or the AWS VPC
+      CNI without changing.
+    requires: [term-cni, term-pod, term-node, term-kubernetes, term-cluster]
+    ecs: |
+      `awsvpc` mode giving each task an ENI and a VPC IP. On EKS it is
+      literally this — real VPC IPs, which caps density per machine by ENI and
+      IP limits. That cap is an AWS detail, not part of the model.
+    tags: [networking, cni, eks]
+
+  - id: m0-why-multi-node
+    q: |
+      Why is this training cluster deliberately three machines instead of one?
+    a: |
+      A single-machine cluster hides everything that matters: placement
+      decisions, spreading copies across failure domains, draining, and
+      machine failure.
+
+      With one machine, "it works" tells you almost nothing about whether it
+      would survive anywhere real.
+    requires:
+      [term-cluster, term-node, term-replica, term-drain, term-scheduler]
+    ecs: |
+      The same reason you would never validate an ECS service against a
+      one-instance cluster running one task. Treat "it worked on single-node
+      KIND" exactly like "it worked in `docker run` on my laptop".
+    tags: [kind, production-realism]
+
+  - id: m0-kind-image-loading
+    q: |
+      Your image builds fine locally, but the workload sits in `ErrImagePull`
+      on KIND. Why?
+    a: |
+      Each machine is a Docker container with its own image store. It cannot
+      see your local daemon's cache, so the image has to be pushed into the
+      machines first:
+
+          kind load docker-image k8s-flashcards:dev --name k8s-training
+    requires: [term-kind-tool, term-container, term-node, term-pod]
+    tags: [kind, tooling, acronym]
+
+  - id: m0-describe-vs-get
+    q: |
+      When debugging, why is `kubectl describe` usually more useful than
+      `kubectl get`?
+    a: |
+      `describe` renders the object *plus the Events attached to it* —
+      placement failures, image pull errors, probe failures, out-of-memory
+      kills.
+
+      That section is where the actual reason lives.
+
+          kubectl describe pod <name>
+          kubectl get events --sort-by=.lastTimestamp
+    requires: [term-kubectl, term-event, term-probe, term-pod]
+    ecs: |
+      The ECS console's Events tab on a service, which you already reach for
+      when a task won't start. Same instinct, different command.
+    tags: [kubectl, debugging, events]
+
+  - id: m0-events-are-ephemeral
+    q: |
+      What is the catch with Events?
+    a: |
+      They expire — roughly an hour — and they live in etcd, not in any log
+      system.
+
+      Excellent for live debugging, useless for postmortems unless you are
+      already shipping them somewhere. That gap is real, and M4 closes it.
+    requires: [term-event, term-etcd]
+    tags: [events, debugging, observability]
+
+  - id: m0-api-groups
+    q: |
+      Why is it `apiVersion: v1` for a Pod but `apps/v1` for a Deployment?
+    a: |
+      The API is split into groups. The original core group has no name (`v1`);
+      later types live in named groups (`apps/v1`, `batch/v1`,
+      `networking.k8s.io/v1`, `rbac.authorization.k8s.io/v1`).
+
+      Groups version independently — which is exactly what bites you when an
+      upgrade removes a beta version your manifest still uses.
+    requires: [term-pod, term-deployment, term-manifest, term-api-server]
+    tags: [api, versioning, upgrades]
+
+  - id: m0-kubectl-explain
+    q: |
+      How do you look up valid fields for a resource without leaving the
+      terminal?
+    a: |
+      ```
+      kubectl explain deployment.spec.strategy
+      kubectl explain pod.spec.containers.resources --recursive
+      ```
+
+      It reads the live cluster's OpenAPI schema, so it is correct for *your*
+      version — including any custom types installed.
+    requires:
+      [
+        term-kubectl,
+        term-cluster,
+        term-spec,
+        term-container,
+        term-crd,
+        term-deployment,
+        term-pod,
+      ]
+    tags: [kubectl, tooling]

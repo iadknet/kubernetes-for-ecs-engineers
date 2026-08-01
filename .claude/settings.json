@@ -4,7 +4,8 @@
       "Bash(trivy --version)",
       "Bash(gitleaks version *)",
       "Bash(hadolint --version)",
-      "Bash(trivy image *)"
+      "Bash(trivy image *)",
+      "Bash(gofmt -w internal/review/review.go)"
     ]
   }
 }

@@ -183,6 +183,13 @@ func (s *Store) Next(cards []deck.Card, now time.Time) (deck.Card, bool) {
 		st, seen := s.st.Cards[c.ID]
 		switch {
 		case !seen:
+			// Gate introduction only. A card already in the schedule keeps its
+			// reviews: withdrawing something you have started learning because a
+			// prerequisite lapsed would strand it.
+			if s.locked(c) {
+				continue
+			}
+
 			fresh = append(fresh, c)
 		case !st.Due.After(now):
 			due = append(due, c)
@@ -202,6 +209,36 @@ func (s *Store) Next(cards []deck.Card, now time.Time) (deck.Card, bool) {
 	}
 
 	return deck.Card{}, false
+}
+
+// Mastered reports whether a card has reached FSRS Review state — retained,
+// not merely seen. It is the mastery signal prerequisite gating reads, and the
+// analogue of a WaniKani item reaching "Guru".
+func (s *Store) Mastered(id string) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	return s.mastered(id)
+}
+
+// mastered is Mastered without the lock, for callers already holding it.
+func (s *Store) mastered(id string) bool {
+	st, seen := s.st.Cards[id]
+	return seen && st.State == fsrs.Review
+}
+
+// locked reports whether a card is being withheld because a prerequisite is not
+// yet retained. Satisfaction is read from the store by card id, so it is
+// evaluated over the whole library: no filter can make an unmastered
+// prerequisite look satisfied.
+func (s *Store) locked(c deck.Card) bool {
+	for _, id := range c.Requires {
+		if !s.mastered(id) {
+			return true
+		}
+	}
+
+	return false
 }
 
 // Cram ignores scheduling entirely and returns the least recently seen card —
@@ -237,11 +274,14 @@ func (s *Store) Cram(cards []deck.Card, exclude string) (deck.Card, bool) {
 
 // Stats summarizes progress over a set of cards.
 type Stats struct {
-	Total        int
-	New          int
-	Due          int
-	Learning     int
-	Known        int
+	Total    int
+	New      int
+	Due      int
+	Learning int
+	Known    int
+	// Locked counts unseen cards held back by an unmastered prerequisite. They
+	// are also counted in New: locked is a reason, not a separate bucket.
+	Locked       int
 	ReviewsToday int
 	NextDue      time.Time
 }
@@ -256,6 +296,11 @@ func (s *Store) Stats(cards []deck.Card, now time.Time) Stats {
 		st, seen := s.st.Cards[c.ID]
 		if !seen {
 			out.New++
+
+			if s.locked(c) {
+				out.Locked++
+			}
+
 			continue
 		}
 

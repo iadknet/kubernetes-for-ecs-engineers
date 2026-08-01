@@ -1,8 +1,10 @@
 # Flashcards
 
 A spaced-repetition drill for Kubernetes concepts, vocabulary, and acronyms —
-**255 cards** across 12 decks, every one of them anchored to its AWS ECS/Fargate
-equivalent (or explicitly flagged as having none).
+**327 cards** across 13 decks, every one of them anchored to its AWS ECS/Fargate
+equivalent (or explicitly flagged as having none). The first deck is a
+**glossary tier**: 72 cards teaching one term apiece, which every other card
+declares a dependency on.
 
 It is also the training program's **example workload**. Rather than deploying a
 stock nginx image in M1–M4, you deploy this, and harden it module by module as
@@ -33,8 +35,15 @@ back — minutes for *Again*, days or weeks for *Easy*.
   interview)
 - `/browse` — every card as a study sheet, no scheduling
 
+A card is **locked** until every term it requires has reached FSRS `Review`
+state — retained, not merely seen. A filtered drill pulls in the terms it needs,
+so `?module=M0` teaches M0's vocabulary as part of M0 and the scope line names
+how many terms it added. The dashboard's *locked* column is the backlog behind
+vocabulary you haven't learned yet; it drains as the glossary lands. Cram mode
+ignores locking entirely, on purpose — it is the night-before escape hatch.
+
 Only 20 unseen cards are introduced per day by default (`NEW_PER_DAY`), because
-starting 255 new cards at once is how a review queue becomes unusable by Friday.
+starting 327 new cards at once is how a review queue becomes unusable by Friday.
 
 ## Configuration
 
@@ -67,9 +76,18 @@ cards:
       ECS Service ≈ K8s **Deployment**. K8s **Service** ≈ the ECS Service's
       load-balancer wiring.
     tags: [service, gotcha]
+    requires: [term-service, term-deployment]   # optional, glossary card ids
+
+  - id: term-service                # a glossary card: it teaches one term
+    term: Service                   # the term; makes this the card that owns it
+    aliases: [Services]             # other spellings that count as the same term
+    q: |
+      Service
+    a: |
+      A stable name and virtual IP in front of a changing set of Pods.
 ```
 
-Two rules worth knowing:
+Three rules worth knowing:
 
 - **`id` is the primary key for review history.** Rename one and that card's
   scheduling resets to new. Fix a typo in the text freely; leave the id alone.
@@ -77,6 +95,10 @@ Two rules worth knowing:
   with an indented code block breaks the YAML parse. Use a fenced ``` block
   instead — `make test` catches this, since the test suite parses every
   real deck and renders every real card through the templates.
+- **Use a glossary term, require it.** `make lint-decks` fails any card whose
+  `q` or `a` uses a term it neither requires nor defines. Decks not yet cleaned
+  up are listed in the allowlist in `internal/deck/glossary_test.go`, and
+  draining a deck's entry is part of reaching that module.
 
 ## What's deliberately missing
 

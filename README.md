@@ -92,21 +92,30 @@ kubernetes_training/
 │   └── 00-setup/             # each module gets a directory as we reach it
 │       └── README.md
 └── flashcards/               # spaced-repetition drill + the program's example workload
-    ├── decks/                # 255 cards, ECS-anchored
+    ├── decks/                # 327 cards, ECS-anchored: a glossary tier plus one deck per module
     └── ...                   # small Go + htmx service, containerized
 ```
 
 ## Drilling the vocabulary
 
 Concepts, vocabulary, and acronyms live in **[flashcards/](flashcards/)** —
-255 cards scheduled with FSRS spaced repetition, every one anchored to its
+327 cards scheduled with FSRS spaced repetition, every one anchored to its
 ECS/Fargate equivalent or explicitly flagged as having none.
+
+`decks/00-glossary.yaml` is a **glossary tier**: 72 cards, one term apiece,
+defined in isolation. Concept cards declare the terms they depend on with
+`requires:`, and a card is not introduced until those terms are retained — so
+vocabulary arrives before the concepts that use it, not after. A filtered drill
+pulls in the terms it needs, so `/drill?module=M0` teaches M0's vocabulary as
+part of M0. Cram mode (`?cram=1`) ignores all of this on purpose.
 
 ```bash
 cd flashcards && make run     # http://localhost:8080
 ```
 
-Drill by module (`/drill?module=M3`) to stay inside what you've covered.
+Drill by module (`/drill?module=M3`) to stay inside what you've covered. The
+dashboard's **locked** count is cards waiting on vocabulary you haven't
+retained yet — it shrinks as the glossary lands.
 
 ## How work starts
 

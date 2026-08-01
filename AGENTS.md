@@ -59,6 +59,15 @@ The code and the spec must not disagree silently.
 - **Prefer established tools over hand-rolled ones**, and deployable artifacts
   (containers, manifests, charts) over local scripts.
 - **From M1 on, `flashcards/` is the workload** that exercises deploy and harden.
+- **Vocabulary is gated.** `flashcards/decks/00-glossary.yaml` teaches one term
+  per card; every other card declares the terms it uses with `requires:`, and
+  `make lint-decks` fails a card that uses a glossary term it does not require.
+  Decks not yet cleaned sit in the allowlist in
+  `flashcards/internal/deck/glossary_test.go`. **Reaching a module includes
+  removing that module's deck from the allowlist** — add the missing
+  `requires:` edges, split any card teaching more than one term, and promote to
+  the glossary any term the module leans on that has no card yet. The list only
+  shrinks.
 - **The real interview submission is the human's own work.** The capstone is a
   rehearsal.
 

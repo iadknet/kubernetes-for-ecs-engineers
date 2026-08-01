@@ -14,12 +14,22 @@ import (
 
 // Card is one flashcard. The ECS field carries the analogy to AWS ECS/Fargate
 // and is deliberately empty for concepts that have no ECS equivalent.
+//
+// A non-empty Term marks the card as a glossary card: the one card in the
+// library that teaches that term. Terms and aliases are matched case
+// sensitively, so a card may claim "KIND" without also claiming "kind".
 type Card struct {
-	ID   string   `json:"id"`
-	Q    string   `json:"q"`
-	A    string   `json:"a"`
-	ECS  string   `json:"ecs"`
-	Tags []string `json:"tags"`
+	ID      string   `json:"id"`
+	Q       string   `json:"q"`
+	A       string   `json:"a"`
+	ECS     string   `json:"ecs"`
+	Tags    []string `json:"tags"`
+	Term    string   `json:"term"`
+	Aliases []string `json:"aliases"`
+
+	// Requires lists card ids that must be mastered before this card is
+	// introduced. The graph it forms is validated acyclic at load time.
+	Requires []string `json:"requires"`
 
 	// Derived from the deck the card was loaded from.
 	Deck   string `json:"-"`
@@ -40,7 +50,8 @@ type Library struct {
 	Decks []Deck
 	Cards []Card
 
-	byID map[string]Card
+	byID   map[string]Card
+	byTerm map[string]Card // every term and alias -> the card teaching it
 }
 
 // Filter narrows a set of cards. Zero value matches everything.
@@ -63,7 +74,7 @@ func Load(fsys fs.FS, dir string) (*Library, error) {
 
 	sort.Strings(entries)
 
-	lib := &Library{byID: make(map[string]Card)}
+	lib := &Library{byID: make(map[string]Card), byTerm: make(map[string]Card)}
 
 	for _, name := range entries {
 		data, err := fs.ReadFile(fsys, name)
@@ -88,7 +99,36 @@ func Load(fsys fs.FS, dir string) (*Library, error) {
 		lib.byID[c.ID] = c
 	}
 
+	if err := lib.indexTerms(); err != nil {
+		return nil, err
+	}
+
+	if err := lib.validateRequires(); err != nil {
+		return nil, err
+	}
+
 	return lib, nil
+}
+
+// indexTerms builds the term -> card index, rejecting any term or alias claimed
+// twice. Without that the mapping is ambiguous and no card definitively teaches
+// the term.
+func (l *Library) indexTerms() error {
+	for _, c := range l.Cards {
+		if c.Term == "" {
+			continue
+		}
+
+		for _, t := range append([]string{c.Term}, c.Aliases...) {
+			if prev, dup := l.byTerm[t]; dup {
+				return fmt.Errorf("duplicate glossary term %q on cards %q and %q: exactly one card must teach each term", t, prev.ID, c.ID)
+			}
+
+			l.byTerm[t] = c
+		}
+	}
+
+	return nil
 }
 
 // LoadDir reads decks from a directory on disk, for the DECKS_DIR override.
@@ -120,6 +160,10 @@ func parse(data []byte, filename string) (Deck, error) {
 
 		if strings.TrimSpace(c.Q) == "" || strings.TrimSpace(c.A) == "" {
 			return Deck{}, fmt.Errorf("%s: card %q needs both 'q' and 'a'", filename, c.ID)
+		}
+
+		if c.Term == "" && len(c.Aliases) > 0 {
+			return Deck{}, fmt.Errorf("%s: card %q has 'aliases' but no 'term'", filename, c.ID)
 		}
 
 		c.Deck = d.Name

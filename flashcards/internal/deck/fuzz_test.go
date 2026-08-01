@@ -31,6 +31,11 @@ func FuzzLoad(f *testing.F) {
 		"deck: D\ncards:\n  - q: q\n    a: a\n",   // card without id
 		"deck: D\ncards:\n  - id: a\n    q: q\n",  // card without answer
 		"deck: [unclosed\n",                       // not YAML at all
+		// Glossary and prerequisite graph shapes: a term card, a self-cycle, and a
+		// two-card cycle inside one file.
+		"deck: G\ncards:\n  - id: term-a\n    term: Pod\n    aliases: [Pods]\n    q: q\n    a: a\n",
+		"deck: G\ncards:\n  - id: a\n    q: q\n    a: a\n    requires: [a]\n",
+		"deck: G\ncards:\n  - id: a\n    q: q\n    a: a\n    requires: [b]\n  - id: b\n    q: q\n    a: a\n    requires: [a]\n",
 		"",
 	}
 	for _, s := range seeds {
@@ -54,6 +59,12 @@ func FuzzLoad(f *testing.F) {
 
 			if strings.TrimSpace(c.Q) == "" || strings.TrimSpace(c.A) == "" {
 				t.Errorf("accepted card %q with an empty question or answer", c.ID)
+			}
+
+			for _, req := range c.Requires {
+				if _, ok := lib.Get(req); !ok {
+					t.Errorf("accepted card %q requiring unknown card %q", c.ID, req)
+				}
 			}
 
 			got, ok := lib.Get(c.ID)

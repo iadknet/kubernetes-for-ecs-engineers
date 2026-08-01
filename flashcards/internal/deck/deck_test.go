@@ -90,6 +90,31 @@ func TestParseRejectsMalformedDecks(t *testing.T) {
 			yaml:    "deck: [unclosed\n",
 			wantErr: "parsing",
 		},
+		{
+			name:    "two cards claim the same term",
+			yaml:    "deck: D\ncards:\n  - id: a\n    term: Pod\n    q: q\n    a: a\n  - id: b\n    term: Pod\n    q: q\n    a: a\n",
+			wantErr: `duplicate glossary term "Pod"`,
+		},
+		{
+			name:    "an alias collides with another card's term",
+			yaml:    "deck: D\ncards:\n  - id: a\n    term: Pod\n    q: q\n    a: a\n  - id: b\n    term: Deployment\n    aliases: [Pod]\n    q: q\n    a: a\n",
+			wantErr: `duplicate glossary term "Pod"`,
+		},
+		{
+			name:    "two cards share an alias",
+			yaml:    "deck: D\ncards:\n  - id: a\n    term: Pod\n    aliases: [workload]\n    q: q\n    a: a\n  - id: b\n    term: Deployment\n    aliases: [workload]\n    q: q\n    a: a\n",
+			wantErr: `duplicate glossary term "workload"`,
+		},
+		{
+			name:    "an alias repeats its own term",
+			yaml:    "deck: D\ncards:\n  - id: a\n    term: Pod\n    aliases: [Pod]\n    q: q\n    a: a\n",
+			wantErr: `duplicate glossary term "Pod"`,
+		},
+		{
+			name:    "aliases without a term",
+			yaml:    "deck: D\ncards:\n  - id: a\n    aliases: [Pod]\n    q: q\n    a: a\n",
+			wantErr: "has 'aliases' but no 'term'",
+		},
 	}
 
 	for _, tt := range tests {
@@ -119,6 +144,118 @@ func TestDuplicateIDsAcrossDecksAreRejected(t *testing.T) {
 	_, err := deck.Load(fsys, "decks")
 	if err == nil || !strings.Contains(err.Error(), "duplicate card id") {
 		t.Fatalf("expected duplicate id error, got %v", err)
+	}
+}
+
+func TestGlossaryTermsAndAliasesAreParsed(t *testing.T) {
+	t.Parallel()
+
+	lib, err := loadOne(t, "deck: D\ncards:\n  - id: term-a\n    term: kube-apiserver\n    aliases: [API server, apiserver]\n    q: q\n    a: a\n")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	c, _ := lib.Get("term-a")
+	if c.Term != "kube-apiserver" {
+		t.Errorf("Term = %q, want kube-apiserver", c.Term)
+	}
+
+	if len(c.Aliases) != 2 || c.Aliases[0] != "API server" {
+		t.Errorf("Aliases = %v", c.Aliases)
+	}
+}
+
+func TestRequiresResolvesAndRejectsBadGraphs(t *testing.T) {
+	t.Parallel()
+
+	card := func(id string, requires ...string) string {
+		s := "  - id: " + id + "\n    q: q\n    a: a\n"
+		if len(requires) > 0 {
+			s += "    requires: [" + strings.Join(requires, ", ") + "]\n"
+		}
+
+		return s
+	}
+
+	tests := []struct {
+		name    string
+		files   map[string]string
+		wantErr string
+	}{
+		{
+			name:  "a resolvable edge across two decks",
+			files: map[string]string{"a": card("term-x"), "b": card("concept", "term-x")},
+		},
+		{
+			name:    "dangling requires",
+			files:   map[string]string{"a": card("concept", "term-nope")},
+			wantErr: `card "concept" requires unknown card "term-nope"`,
+		},
+		{
+			name:    "self require",
+			files:   map[string]string{"a": card("concept", "concept")},
+			wantErr: "requires cycle",
+		},
+		{
+			name:    "two-node cycle across files",
+			files:   map[string]string{"a": card("one", "two"), "b": card("two", "one")},
+			wantErr: "requires cycle",
+		},
+		{
+			name:    "three-node cycle across files",
+			files:   map[string]string{"a": card("one", "two"), "b": card("two", "three"), "c": card("three", "one")},
+			wantErr: "requires cycle",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			fsys := fstest.MapFS{}
+			for name, cards := range tt.files {
+				fsys["decks/"+name+".yaml"] = &fstest.MapFile{Data: []byte("deck: " + name + "\ncards:\n" + cards)}
+			}
+
+			_, err := deck.Load(fsys, "decks")
+			if tt.wantErr == "" {
+				if err != nil {
+					t.Fatalf("expected the graph to load, got %v", err)
+				}
+
+				return
+			}
+
+			if err == nil {
+				t.Fatal("expected an error, got nil")
+			}
+
+			if !strings.Contains(err.Error(), tt.wantErr) {
+				t.Errorf("error %q does not mention %q", err, tt.wantErr)
+			}
+		})
+	}
+}
+
+// The cycle error has to name the cards in it, or a 60-card glossary graph is
+// undebuggable.
+func TestCycleErrorNamesTheCycle(t *testing.T) {
+	t.Parallel()
+
+	fsys := fstest.MapFS{
+		"decks/a.yaml": {Data: []byte("deck: A\ncards:\n  - id: one\n    q: q\n    a: a\n    requires: [two]\n")},
+		"decks/b.yaml": {Data: []byte("deck: B\ncards:\n  - id: two\n    q: q\n    a: a\n    requires: [one]\n")},
+	}
+
+	_, err := deck.Load(fsys, "decks")
+	if err == nil {
+		t.Fatal("expected a cycle error")
+	}
+
+	for _, want := range []string{"one", "two"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("cycle error %q does not name card %q", err, want)
+		}
 	}
 }
 

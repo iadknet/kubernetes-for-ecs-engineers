@@ -145,6 +145,7 @@ type cardView struct {
 	ECS    template.HTML
 	Filter filter
 	Stats  review.Stats
+	Terms  int // prerequisite terms pulled into this scope
 }
 
 // URL builds an action URL for this card, preserving the drill scope so htmx
@@ -165,14 +166,33 @@ func (v cardView) GradeURL(g int) template.URL {
 }
 
 func (s *Server) view(c deck.Card, f filter) cardView {
+	cards, terms := s.scope(f)
+
 	return cardView{
 		Card:   c,
 		Q:      s.markdown(c.Q),
 		A:      s.markdown(c.A),
 		ECS:    s.markdown(c.ECS),
 		Filter: f,
-		Stats:  s.store.Stats(s.lib.Select(f.Filter), s.now()),
+		Stats:  s.store.Stats(cards, s.now()),
+		Terms:  terms,
 	}
+}
+
+// scope is the set of cards a drill covers: the filter's own cards plus any
+// prerequisite terms they depend on, and how many of those were pulled in.
+//
+// Cram is left unexpanded: it ignores gating entirely, so pulling in terms
+// would only dilute the scope the reviewer actually asked for.
+func (s *Server) scope(f filter) (cards []deck.Card, terms int) {
+	selected := s.lib.Select(f.Filter)
+	if f.Cram {
+		return selected, 0
+	}
+
+	expanded := s.lib.WithPrerequisites(selected)
+
+	return expanded, len(expanded) - len(selected)
 }
 
 func (s *Server) markdown(src string) template.HTML {
@@ -197,7 +217,7 @@ func (s *Server) markdown(src string) template.HTML {
 
 // next picks the card to show under the current filter.
 func (s *Server) next(f filter, exclude string) (deck.Card, bool) {
-	cards := s.lib.Select(f.Filter)
+	cards, _ := s.scope(f)
 	if len(cards) == 0 {
 		return deck.Card{}, false
 	}
@@ -240,10 +260,12 @@ func (s *Server) handleIndex(w http.ResponseWriter, _ *http.Request) {
 func (s *Server) handleDrill(w http.ResponseWriter, r *http.Request) {
 	f := filterFrom(r)
 	card, ok := s.next(f, "")
+	cards, terms := s.scope(f)
 
 	data := map[string]any{
 		"Filter":  f,
-		"Stats":   s.store.Stats(s.lib.Select(f.Filter), s.now()),
+		"Stats":   s.store.Stats(cards, s.now()),
+		"Terms":   terms,
 		"HasCard": ok,
 	}
 	if ok {
@@ -288,9 +310,11 @@ func (s *Server) handleGrade(w http.ResponseWriter, r *http.Request) {
 
 	card, ok := s.next(f, id)
 	if !ok {
+		cards, terms := s.scope(f)
 		s.renderFragment(w, "card-done", map[string]any{
 			"Filter": f,
-			"Stats":  s.store.Stats(s.lib.Select(f.Filter), s.now()),
+			"Stats":  s.store.Stats(cards, s.now()),
+			"Terms":  terms,
 		})
 
 		return

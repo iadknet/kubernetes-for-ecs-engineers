@@ -39,7 +39,7 @@
 
 {{define "card-done"}}
 <div id="card" class="card">
-  <div class="meta">{{.Filter.Label}}</div>
+  <div class="meta">{{.Filter.Label}}{{if .Terms}} + {{.Terms}} prerequisite term{{if ne .Terms 1}}s{{end}}{{end}}</div>
   <p><strong>Nothing due right now.</strong></p>
   {{if .Stats.NextDue.IsZero}}
     <p class="muted small">Every card in this scope is scheduled. Pick another
@@ -56,7 +56,7 @@
 
 {{define "drill-stats"}}
 <p class="muted small" id="drill-stats" hx-swap-oob="true">
-  {{.Due}} due · {{.New}} new · {{.Learning}} learning · {{.Known}} known ·
-  {{.ReviewsToday}} reviewed today
+  {{.Due}} due · {{.New}} new{{if .Locked}} ({{.Locked}} locked){{end}} ·
+  {{.Learning}} learning · {{.Known}} known · {{.ReviewsToday}} reviewed today
 </p>
 {{end}}

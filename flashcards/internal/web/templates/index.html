@@ -2,7 +2,7 @@
 
 <div class="statline">
   <div><b>{{.Total.Due}}</b> due now</div>
-  <div><b>{{.Total.New}}</b> unseen</div>
+  <div><b>{{.Total.New}}</b> unseen{{if .Total.Locked}} <span class="muted">({{.Total.Locked}} locked)</span>{{end}}</div>
   <div><b>{{.Total.Known}}</b> known</div>
   <div><b>{{.Total.ReviewsToday}}</b> reviewed today</div>
   <div><b>{{.Streak}}</b> day streak</div>
@@ -15,7 +15,7 @@
   <thead>
     <tr>
       <th>Deck</th><th>Module</th>
-      <th class="num">Due</th><th class="num">New</th><th class="num">Cards</th>
+      <th class="num">Due</th><th class="num">New</th><th class="num">Locked</th><th class="num">Cards</th>
     </tr>
   </thead>
   <tbody>
@@ -25,6 +25,7 @@
       <td>{{with .Module}}<span class="pill">{{.}}</span>{{end}}</td>
       <td class="num">{{if .Stats.Due}}<strong>{{.Stats.Due}}</strong>{{else}}<span class="muted">0</span>{{end}}</td>
       <td class="num muted">{{.Stats.New}}</td>
+      <td class="num muted">{{.Stats.Locked}}</td>
       <td class="num muted">{{.Stats.Total}}</td>
     </tr>
   {{end}}

@@ -4,6 +4,8 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
+	"regexp"
+	"strconv"
 	"strings"
 	"testing"
 	"testing/fstest"
@@ -268,5 +270,150 @@ func TestRealDecksRenderEndToEnd(t *testing.T) {
 		if rec.Code != http.StatusOK {
 			t.Fatalf("revealing %q = %d: %s", c.ID, rec.Code, rec.Body)
 		}
+	}
+}
+
+// --- Prerequisite expansion --------------------------------------------------
+
+// Glossary terms carry no module — a term like RBAC spans several — so a
+// module-filtered drill has to pull in the terms it depends on or it dead-ends
+// behind cards it can never unlock.
+const gatedDecks = `
+deck: Glossary
+tags: [glossary]
+cards:
+  - id: term-pod
+    term: Pod
+    q: |
+      Pod
+    a: |
+      The smallest deployable unit.
+  - id: term-node
+    term: node
+    q: |
+      node
+    a: |
+      A machine that runs workloads.
+`
+
+const gatedModule = `
+deck: Foundations
+module: M0
+tags: [foundations]
+cards:
+  - id: m0-concept
+    q: |
+      What does a Deployment manage?
+    a: |
+      Replicas.
+    requires: [term-pod]
+  - id: m0-ungated-one
+    q: |
+      Why three machines?
+    a: |
+      One hides everything that matters.
+  - id: m0-ungated-two
+    q: |
+      Where do Events live?
+    a: |
+      In the datastore, for about an hour.
+`
+
+func gatedServer(t *testing.T) (http.Handler, *deck.Library) {
+	t.Helper()
+
+	lib, err := deck.Load(fstest.MapFS{
+		"decks/00-glossary.yaml":    {Data: []byte(gatedDecks)},
+		"decks/01-foundations.yaml": {Data: []byte(gatedModule)},
+	}, "decks")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	store, err := review.Open(filepath.Join(t.TempDir(), "review.json"), 20)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	srv, err := web.New(lib, store)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	return srv.Routes(), lib
+}
+
+func TestModuleDrillIntroducesItsPrerequisiteTerms(t *testing.T) {
+	t.Parallel()
+
+	h, _ := gatedServer(t)
+
+	rec := do(t, h, "GET", "/drill?module=M0")
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, body: %s", rec.Code, rec.Body)
+	}
+
+	body := rec.Body.String()
+	if strings.Contains(body, "Nothing due") {
+		t.Fatal("a fresh M0 drill reported an empty queue instead of teaching its vocabulary")
+	}
+
+	if !strings.Contains(body, "term-pod") {
+		t.Errorf("expected the drill to introduce the prerequisite term, got: %s", body)
+	}
+}
+
+func TestDrillScopeNamesThePulledInTermCount(t *testing.T) {
+	t.Parallel()
+
+	h, _ := gatedServer(t)
+
+	body := do(t, h, "GET", "/drill?module=M0").Body.String()
+	if !strings.Contains(body, "1 prerequisite term") {
+		t.Errorf("drill scope should name how many prerequisite terms it pulled in, got: %s", body)
+	}
+}
+
+// The index is an inventory: expanding a deck row would count the same glossary
+// cards in every row, so the rows must sum to the library total.
+// The index is an inventory: expanding a deck row would count the same glossary
+// cards in every row, so the rendered rows must still sum to the library total.
+func TestIndexDeckRowsAreNotExpanded(t *testing.T) {
+	t.Parallel()
+
+	h, lib := gatedServer(t)
+
+	rec := do(t, h, "GET", "/")
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, body: %s", rec.Code, rec.Body)
+	}
+
+	// Each row renders New, Locked and Total in that order, so every third
+	// count is a row's own card total.
+	counts := regexp.MustCompile(`<td class="num muted">(\d+)</td>`).
+		FindAllStringSubmatch(rec.Body.String(), -1)
+	if len(counts)%3 != 0 || len(counts)/3 != len(lib.Decks) {
+		t.Fatalf("parsed %d counts for %d decks; the index markup changed shape",
+			len(counts), len(lib.Decks))
+	}
+
+	var (
+		sum    int
+		totals []int
+	)
+
+	for i := 2; i < len(counts); i += 3 {
+		n, err := strconv.Atoi(counts[i][1])
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		totals = append(totals, n)
+		sum += n
+	}
+
+	if sum != len(lib.Cards) {
+		t.Errorf("rendered deck totals %v sum to %d, library has %d cards: the drill expansion leaked into the inventory",
+			totals, sum, len(lib.Cards))
 	}
 }
