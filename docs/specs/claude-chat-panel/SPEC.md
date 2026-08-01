@@ -8,15 +8,20 @@
 ## Overview
 
 A chat side panel in the drill view lets you ask Claude about the current card
-without switching to Claude Code. The panel is backed by the `claude` CLI in
+without switching to Claude Code. The panel talks to a chat *provider* behind a
+small interface; the only provider built here wraps the `claude` CLI in
 headless mode (`claude -p`), running on the local Claude subscription — no API
-key, no per-token billing. It is a local-only developer feature of the
-flashcards workload, gated off by default so the deployed artifact is unchanged;
-it belongs to no module.
+key, no per-token billing. That provider makes the feature local-only, and it
+is gated off by default so the deployed artifact is unchanged; it belongs to
+no module.
 
-The Claude Agent SDK is not an option here: Anthropic permits subscription auth
-for the CLI itself but requires API keys for Agent SDK integrations. Wrapping
-the CLI as a subprocess is the supported path.
+The interface exists so a future provider — API-key driven, containerizable,
+possibly a different vendor entirely — is a new implementation plus config,
+with no handler or UI change. Building that provider is out of scope.
+
+The Claude Agent SDK is not an option for the CLI provider: Anthropic permits
+subscription auth for the CLI itself but requires API keys for Agent SDK
+integrations. Wrapping the CLI as a subprocess is the supported path.
 
 ---
 
@@ -36,12 +41,18 @@ the CLI as a subprocess is the supported path.
 - Off by default. Without `CHAT_ENABLED=true` the binary serves no chat route,
   ships no panel markup, and behaves byte-for-byte like today. The Dockerfile
   and every manifest need no change.
-- Fail fast on misconfiguration: `CHAT_ENABLED=true` with no `claude` binary on
-  `PATH` (or at `CLAUDE_BIN`) is a startup error, not a broken panel at runtime.
-- No secrets touch the app: auth is the CLI's own login state. The app never
-  reads, stores, or forwards a credential.
-- Claude gets read-only tools (`Read`, `Grep`, `Glob`) — the chat can cite the
-  curriculum and decks but cannot edit or execute anything.
+- The web layer and UI depend only on the `chat.Provider` interface — no CLI
+  flag names, model names, or claude-specific event shapes above the provider.
+  Swapping providers is a new implementation selected by `CHAT_PROVIDER`.
+- Fail fast on misconfiguration: an unknown `CHAT_PROVIDER`, or the claude-cli
+  provider with no `claude` binary on `PATH` (or at `CLAUDE_BIN`), is a startup
+  error, not a broken panel at runtime. Each provider owns its own startup
+  validation.
+- No secrets touch the app: the claude-cli provider's auth is the CLI's own
+  login state. The app never reads, stores, or forwards a credential.
+- Claude gets read-only tools (`Read`, `Grep`, `Glob`) — it cannot edit or
+  execute anything. File reads are not sandboxed to the repo; acceptable
+  because the loopback guard limits callers to the local user.
 - Chat endpoints answer loopback clients only. The server binds all interfaces
   (`:PORT`); the chat handlers must not let anyone else on the network spend the
   subscription.
@@ -58,47 +69,72 @@ the cluster; no manifest sets `CHAT_ENABLED`.
 ### Go Components
 
 ```text
-- `cmd/flashcards/main.go` — read CHAT_ENABLED (default false), CLAUDE_BIN
-  (default "claude"), and CHAT_MODEL (default "sonnet" — the panel's default
-  model selection) via env helpers, envBool being new; when enabled, resolve
-  the binary with exec.LookPath at startup and fail run() if missing; document
-  the vars in the package comment; pass a web.Config into web.New.
-- `internal/chat/chat.go` — Runner: spawns the CLI per turn with
-  `-p <prompt> --output-format stream-json --verbose
-  --include-partial-messages --append-system-prompt <tutoring instructions>
+- `internal/chat/chat.go` — the provider-neutral surface, no claude imports:
+
+  - `Provider` interface: `Send(ctx, Turn, emit func(delta string) error)
+    error` streams one turn's text deltas; `Reset()` starts a fresh
+    conversation; `Options() Options` reports capabilities.
+  - `Turn` carries structured fields — `Message` (the user's question),
+    `CardContext` (the card block: deck, front, back, requires terms —
+    assembled by web, since it is flashcards domain knowledge),
+    `SystemPrompt` (tutoring instructions), and the selected model/effort.
+    Providers decide how to compose these onto their wire; the interface never
+    carries a pre-flattened prompt.
+  - `Options` carries `Models []string`, `DefaultModel string`, and
+    `Efforts []string` (empty ⇒ the provider has no effort dial and the UI
+    hides the selector). The web layer validates requests against these — no
+    allowlists live above the provider.
+
+  Conversation continuity is the provider's concern (the CLI provider holds a
+  session id; an API provider would hold message history).
+- `internal/chat/claudecli/claudecli.go` — the one Provider built here. Owns
+  its configuration: the constructor reads CLAUDE_BIN (default "claude") and
+  CHAT_MODEL (default "sonnet"), validates the binary with exec.LookPath and
+  CHAT_MODEL against its model list, and fails construction on either.
+  Composes the Turn as `-p <CardContext + Message> --output-format stream-json
+  --verbose --include-partial-messages --append-system-prompt <SystemPrompt>
   --tools "Read,Grep,Glob" --model <model> [--effort <effort>]`, cwd = the
   server's working directory, kills the subprocess when the request context is
-  cancelled, parses the NDJSON event stream into text deltas + the session id,
-  and passes `--resume <session id>` on every turn after the first. Model and
-  effort are per-turn parameters: `--model` overrides a resumed session's
-  model, so switching mid-session needs no reset; `--effort` is omitted when
-  unset, leaving the model default.
-- `internal/web/web.go` — web.New gains a Config{Chat *chat.Runner, ChatModel
-  string}; Routes registers POST /chat and POST /chat/reset only when Chat is
-  non-nil; both handlers reject non-loopback RemoteAddr with 403. POST /chat
-  takes the user message, the current card id, and optional model/effort
-  fields validated against fixed allowlists (models: sonnet, opus, haiku —
-  the CLI offers no programmatic listing, so the list is hard-coded; efforts:
-  low, medium, high, xhigh, max, or empty for model default); unknown values
-  → 400. The handler prepends a card-context block (deck, front, back,
-  requires terms) to the prompt and relays text deltas to the client as an
-  SSE stream on the POST response.
+  cancelled, parses the NDJSON event stream into deltas + the session id, and
+  passes `--resume <session id>` on every turn after the first. `--model`
+  overrides a resumed session's model, so switching mid-session needs no
+  reset; `--effort` is omitted when unset. Options reports models
+  sonnet/opus/haiku (the CLI offers no programmatic listing, so the list is
+  hard-coded here), default from CHAT_MODEL, efforts low/medium/high/xhigh/max.
+- `cmd/flashcards/main.go` — reads only the provider-neutral vars: CHAT_ENABLED
+  (default false, via a new envBool helper) and CHAT_PROVIDER (default
+  "claude-cli", the only value; unknown → startup error). Constructs the
+  selected provider when enabled and fails run() if construction fails.
+  Provider-specific env vars (CLAUDE_BIN, CHAT_MODEL, and any a future
+  provider adds) are read, validated, and documented by the provider package —
+  the generic wiring never learns provider vocabulary. Pass a web.Config into
+  web.New; document CHAT_ENABLED/CHAT_PROVIDER in the package comment.
+- `internal/web/web.go` — web.New gains a Config{Chat chat.Provider}; Routes
+  registers POST /chat and POST /chat/reset only when Chat is non-nil; both
+  handlers reject non-loopback RemoteAddr with 403. POST /chat takes the user
+  message, the current card id, and optional model/effort fields validated
+  against the provider's Options (unknown values → 400), builds the Turn
+  (CardContext from the card's deck/front/back/requires, the tutoring
+  SystemPrompt, the message, model/effort), and relays deltas to the client
+  as an SSE stream on the POST response.
 - `internal/web/templates/drill.html` + `static/` — panel markup with model
-  and effort selectors above the chat box (model preselected from CHAT_MODEL,
-  effort defaulting to "model default"), sent with each message; plus a small
-  vanilla-JS client (fetch + ReadableStream; no htmx SSE extension — it is a
-  CDN dependency and the app rule is no CDN), rendered only when chat is
-  enabled.
+  and effort selectors above the chat box, rendered from the provider's
+  Options (default model preselected; effort selector omitted when the
+  provider reports none), sent with each message; plus a small vanilla-JS
+  client (fetch + ReadableStream; no htmx SSE extension — it is a CDN
+  dependency and the app rule is no CDN), rendered only when chat is enabled.
 ```
 
-Session model: this is a single-user app, so the Runner holds one current
-session id in memory. `/chat/reset` clears it; a server restart does too.
+Session model: this is a single-user app, so the provider holds one current
+conversation in memory. `/chat/reset` clears it; a server restart does too.
 
 ### Observability
 
-- Logs: one slog line per turn — `session_id`, `card`, `dur`, `exit_code`; one
-  per subprocess failure with stderr tail. Surfaced on stdout like all existing
-  logs.
+- Logs, split by ownership so the interface stays clean: web logs one line per
+  turn with the generic fields — `card`, `model`, `effort`, `dur`, error if
+  any. Each provider logs its own implementation detail from inside Send — for
+  claude-cli that is `session_id`, `exit_code`, and a stderr tail on failure.
+  All on stdout like existing logs.
 - Metrics: none — the app exposes no metrics endpoint yet (arrives M4), and a
   disabled-in-cluster feature does not justify starting one.
 
@@ -108,29 +144,31 @@ session id in memory. `/chat/reset` clears it; a server restart does too.
 
 ### Phase 1: Flag, validation, and gating — ⏳ PLANNED
 
-**Objective**: The feature can be switched on and off, and misconfiguration
-fails at boot.
+**Objective**: The interface exists, the feature gates off cleanly, and an
+unknown provider fails at boot. (Provider-specific validation — the missing
+binary — lands with the provider in Phase 2.)
 
 **Tasks**:
 
 - [ ] Add failing tests: envBool parsing; Routes without chat serves 404 on
-      /chat and drill HTML contains no panel markup — `internal/web/web_test.go`
-- [ ] Add envBool, CHAT_ENABLED/CLAUDE_BIN/CHAT_MODEL wiring, and the LookPath
-      startup check in `cmd/flashcards/main.go`; thread web.Config through
-      web.New
+      /chat and drill HTML contains no panel markup; CHAT_PROVIDER=bogus fails
+      run() — `internal/web/web_test.go` and the cmd-level check
+- [ ] Define the Provider/Turn/Options types in `internal/chat`
+- [ ] Add envBool and CHAT_ENABLED/CHAT_PROVIDER wiring with provider selection
+      in `cmd/flashcards/main.go`; thread web.Config through web.New
 - [ ] Sync `flashcards/README.md` and the main.go package comment with the new
       env vars
 
 **Deliverables**:
 
-- `CHAT_ENABLED=true` without a binary exits non-zero with a clear error
 - Default build is unchanged (no route, no markup)
+- Unknown CHAT_PROVIDER exits non-zero with a clear error
 - `flashcards/README.md` updated
 
-### Phase 2: CLI runner — ⏳ PLANNED
+### Phase 2: claude-cli provider — ⏳ PLANNED
 
-**Objective**: `internal/chat` can run a turn against a stub binary and resume
-the session on the next turn.
+**Objective**: `internal/chat/claudecli` implements Provider against a stub
+binary, resuming the session on the next turn.
 
 **Tasks**:
 
@@ -138,14 +176,19 @@ the session on the next turn.
       emits canned stream-json: deltas surface in order; session id is captured;
       second turn passes --resume; --model is passed every turn and --effort
       only when set; context cancellation kills the process; non-zero exit
-      returns an error carrying the stderr tail — `internal/chat/chat_test.go`
-- [ ] Implement the Runner until the tests pass
-- [ ] Sync docs: none expected beyond package doc comments
+      returns an error carrying the stderr tail; Options reports the documented
+      models and efforts; the constructor rejects a missing binary and a
+      CHAT_MODEL outside its model list —
+      `internal/chat/claudecli/claudecli_test.go`
+- [ ] Implement the provider until the tests pass
+- [ ] Sync docs: document CLAUDE_BIN and CHAT_MODEL in the claudecli package
+      doc and `flashcards/README.md`
 
 **Deliverables**:
 
-- `internal/chat` package with stub-driven tests; no network or real
+- `internal/chat/claudecli` package with stub-driven tests; no network or real
   subscription use in `make check`
+- `CHAT_ENABLED=true` without a claude binary exits non-zero with a clear error
 
 ### Phase 3: Endpoint and panel — ⏳ PLANNED
 
@@ -154,18 +197,22 @@ the current card.
 
 **Tasks**:
 
-- [ ] Add failing tests with a fake runner: POST /chat streams SSE and the
-      prompt contains the card's front/back/requires; unknown card id, model,
-      or effort → 400; the request's model/effort reach the runner, with
-      CHAT_MODEL as the default when omitted; non-loopback RemoteAddr → 403;
-      /chat/reset clears the session — `internal/web/web_test.go`
+- [ ] Add failing tests with a fake Provider: POST /chat streams SSE and the
+      Turn's CardContext contains the card's front/back/requires; unknown card id,
+      model, or effort → 400 (validated against the fake's Options); the
+      request's model/effort reach the provider, with its DefaultModel used
+      when omitted; the selectors render from Options and the effort selector
+      is absent when Efforts is empty; non-loopback RemoteAddr → 403;
+      /chat/reset resets the provider — `internal/web/web_test.go`
 - [ ] Implement the handlers, card-context block, tutoring system-prompt text,
       and the SSE relay (clear the write deadline per request — see
       Implementation Details)
 - [ ] Add the panel markup, model/effort selectors, and JS client to
       drill.html/static
 - [ ] Manual verification against the real CLI: ask about a glossary card and
-      confirm the answer uses ECS framing
+      confirm the answer uses ECS framing; also ask the card's own question
+      before flipping it and confirm the panel explains without answering the
+      card directly
 - [ ] Sync `flashcards/README.md` (usage section) and this spec's status
 
 **Deliverables**:
@@ -179,13 +226,13 @@ the current card.
 
 ### TDD Plan
 
-- Phase 1 tests: `internal/web/web_test.go` (gating), `cmd` covered by the
-  existing pattern of env helpers being exercised at startup — the LookPath
-  failure is verified by running `run()` with a bogus CLAUDE_BIN.
-- Phase 2 tests: `internal/chat/chat_test.go` with a stub binary (a shell
-  script written to t.TempDir()) — the seam that keeps `make check` free of
-  network, auth, and quota use.
-- Phase 3 tests: `internal/web/web_test.go` with a fake runner interface.
+- Phase 1 tests: `internal/web/web_test.go` (gating); the unknown-provider
+  failure is verified by running `run()` with CHAT_PROVIDER=bogus.
+- Phase 2 tests: `internal/chat/claudecli/claudecli_test.go` with a stub
+  binary (a shell script written to t.TempDir()) — the seam that keeps
+  `make check` free of network, auth, and quota use.
+- Phase 3 tests: `internal/web/web_test.go` with a fake chat.Provider — the
+  same seam a future provider swap exercises.
 - Regression: `make check` before each phase is marked complete.
 
 ### TDD Exceptions
@@ -215,14 +262,19 @@ loosening the global timeout for every route.
 - [ ] With `CHAT_ENABLED` unset: `curl -i localhost:8080/chat` → 404, and the
       drill page HTML contains no chat markup
 - [ ] `CHAT_ENABLED=true CLAUDE_BIN=/nonexistent ./flashcards` exits non-zero
-      naming the missing binary
-- [ ] With the stub binary, `go test ./internal/chat ./internal/web` proves
+      naming the missing binary, and `CHAT_PROVIDER=bogus` exits non-zero
+      naming the unknown provider
+- [ ] With the stub binary, `go test ./internal/chat/... ./internal/web` proves
       streaming, resume, cancellation, and the loopback guard
+- [ ] `internal/web` imports `internal/chat` but not
+      `internal/chat/claudecli` (`go list -deps ./internal/web | grep
+      claudecli` is empty) — the swap seam holds
 - [ ] On a logged-in laptop: a question about the current card streams an
       answer that uses the card's content and an ECS analogy, and a follow-up
-      question shows the session resumed (same session id logged)
+      question shows the session resumed (same session id in the claudecli
+      provider's log)
 - [ ] Switching the model selector between two turns keeps the same session id
-      while the turn log shows the new model
+      in the provider's log while web's turn log shows the new model
 - [ ] `make check` passes
 - [ ] Docker image builds unchanged and serves the app with no chat surface
 
@@ -236,6 +288,9 @@ loosening the global timeout for every route.
 
 ## Future Enhancements
 
+- An API-key-driven Provider (any vendor) that can run in the container —
+  new spec; it will also need to replace the loopback guard with real auth
+  and revisit "no secrets touch the app"
 - Persist chat transcripts alongside review state so a session survives restart
 - A "explain why my answer was wrong" quick action that sends the graded answer
   automatically
