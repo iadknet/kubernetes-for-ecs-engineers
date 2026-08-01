@@ -42,7 +42,7 @@ how many terms it added. The dashboard's *locked* column is the backlog behind
 vocabulary you haven't learned yet; it drains as the glossary lands. Cram mode
 ignores locking entirely, on purpose — it is the night-before escape hatch.
 
-Only 20 unseen cards are introduced per day by default (`NEW_PER_DAY`), because
+Only 40 unseen cards are introduced per day by default (`NEW_PER_DAY`), because
 starting 327 new cards at once is how a review queue becomes unusable by Friday.
 
 ## Configuration
@@ -52,7 +52,7 @@ starting 327 new cards at once is how a review queue becomes unusable by Friday.
 | `PORT` | `8080` | Listen port |
 | `DATA_DIR` | `./data` | Where `review.json` is persisted |
 | `DECKS_DIR` | *(unset)* | Read decks from disk instead of the embedded copy |
-| `NEW_PER_DAY` | `20` | Cap on newly introduced cards per day |
+| `NEW_PER_DAY` | `40` | Cap on newly introduced cards per day |
 
 `DECKS_DIR` exists for a specific exercise: in M2 you mount the decks from a
 **ConfigMap** and watch config decouple from the image.

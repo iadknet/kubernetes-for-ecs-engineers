@@ -15,7 +15,9 @@
       "Bash(kill %1)",
       "Bash(curl -s \"http://localhost:8080/drill?deck=00-glossary\")",
       "Bash(curl -s -X POST \"http://localhost:8080/drill/term-pod/pick?p=term-node&deck=00-glossary\")",
-      "Bash(pkill -f 'flashcards')"
+      "Bash(pkill -f 'flashcards')",
+      "Bash(docker stop *)",
+      "Bash(python3 -c ' *)"
     ]
   }
 }

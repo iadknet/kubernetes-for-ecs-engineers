@@ -6,7 +6,7 @@
 //	PORT         listen port (default 8080)
 //	DATA_DIR     where review state is persisted (default ./data)
 //	DECKS_DIR    read decks from disk instead of the embedded copy
-//	NEW_PER_DAY  cap on newly introduced cards per day (default 20)
+//	NEW_PER_DAY  cap on newly introduced cards per day (default 40)
 package main
 
 import (
@@ -41,7 +41,7 @@ func run(log *slog.Logger) error {
 		port      = env("PORT", "8080")
 		dataDir   = env("DATA_DIR", "./data")
 		decksDir  = os.Getenv("DECKS_DIR")
-		newPerDay = envInt("NEW_PER_DAY", 20)
+		newPerDay = envInt("NEW_PER_DAY", 40)
 	)
 
 	// Decks come from the embedded copy unless DECKS_DIR points at a directory
