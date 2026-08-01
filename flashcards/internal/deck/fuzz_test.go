@@ -36,6 +36,11 @@ func FuzzLoad(f *testing.F) {
 		"deck: G\ncards:\n  - id: term-a\n    term: Pod\n    aliases: [Pods]\n    q: q\n    a: a\n",
 		"deck: G\ncards:\n  - id: a\n    q: q\n    a: a\n    requires: [a]\n",
 		"deck: G\ncards:\n  - id: a\n    q: q\n    a: a\n    requires: [b]\n  - id: b\n    q: q\n    a: a\n    requires: [a]\n",
+		// Checkpoint shapes: a valid checkpoint whose edges are synthesized, the
+		// term/checkpoint conflict, and a checkpoint naming a module with no cards.
+		"deck: C\nmodule: M0\ncards:\n  - id: a\n    q: q\n    a: a\n  - id: cp\n    checkpoint: M0\n    q: q\n    a: a\n",
+		"deck: C\nmodule: M0\ncards:\n  - id: a\n    term: Pod\n    checkpoint: M0\n    q: q\n    a: a\n",
+		"deck: C\nmodule: M0\ncards:\n  - id: cp\n    checkpoint: M9\n    q: q\n    a: a\n",
 		"",
 	}
 	for _, s := range seeds {

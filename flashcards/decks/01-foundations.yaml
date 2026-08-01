@@ -442,3 +442,96 @@ cards:
         term-pod,
       ]
     tags: [kubectl, tooling]
+
+  # --- Checkpoint --------------------------------------------------------------
+  # Sat at /checkpoint?module=M0, not drilled. These require every M0 card
+  # implicitly (deck.Load synthesizes the edges from `checkpoint: M0`); the
+  # explicit list below is the glossary vocabulary the lint holds them to.
+
+  - id: m0-checkpoint-machine-roles
+    checkpoint: M0
+    q: |
+      You run `kubectl get nodes` on this training cluster and see one machine
+      marked `control-plane` and two that are not.
+
+      Name what runs on each side of that split, and say which side your own
+      workload lands on and why.
+    a: |
+      Control-plane side — four components, one job each:
+
+      - kube-apiserver — the only front door; the only thing that touches etcd
+      - etcd — the store of record for cluster state
+      - kube-scheduler — decides which machine each Pod goes to
+      - kube-controller-manager — runs the reconciliation loops
+
+      Every side — including the control-plane machine — runs a kubelet and a
+      kube-proxy, because those are what make a machine usable at all.
+
+      Your workload lands on a worker, because the control-plane machine is
+      normally tainted so ordinary Pods will not schedule onto it. The split is
+      about blast radius: a workload that can starve the control plane takes the
+      whole cluster's ability to react with it.
+
+      *Rubric: full credit = all four control-plane components with a function
+      each, kubelet and kube-proxy named as present on every machine, and the
+      taint named as the reason workloads land on workers.*
+    requires:
+      [
+        term-api-server,
+        term-etcd,
+        term-scheduler,
+        term-kube-controller-manager,
+        term-kubelet,
+        term-kube-proxy,
+        term-node,
+        term-pod,
+        term-kubectl,
+        term-cluster,
+        term-taint,
+        term-reconciliation,
+      ]
+    ecs: |
+      ECS has all of this and shows you none of it: no `aws ecs get-scheduler`,
+      no way to ask which component has not acted. The reason this split is
+      worth memorizing is that it turns "the task won't start" into a question
+      with an addressable owner.
+    tags: [control-plane, architecture, checkpoint]
+
+  - id: m0-checkpoint-wrong-cluster
+    checkpoint: M0
+    q: |
+      A command you have run a hundred times returns "no resources found". The
+      cluster is healthy and the workload is definitely running.
+
+      Name the three things a kubeconfig context selects, say which one most
+      often causes this, and give the two commands that diagnose it.
+    a: |
+      A context selects three things:
+
+      - **cluster** — which API server to talk to
+      - **user** — which identity to present
+      - **namespace** — the default scope for namespaced objects
+
+      The namespace causes this most often: the context is right, the identity
+      is right, and you are simply looking in the wrong scope. The cluster
+      causes the scarier version of the same mistake, where a write lands
+      somewhere real.
+
+          kubectl config get-contexts        # which context, and its namespace
+          kubectl config current-context
+
+      *Rubric: full credit = all three parts of the context, the namespace named
+      as the usual cause, and both commands.*
+    requires:
+      [
+        term-kubeconfig,
+        term-cluster,
+        term-namespace,
+        term-api-server,
+        term-kubectl,
+      ]
+    ecs: |
+      An AWS named profile plus a region, with the same failure mode: the right
+      command against the wrong account. `use-context` is `export AWS_PROFILE`,
+      and it deserves the same paranoia.
+    tags: [kubectl, kubeconfig, checkpoint]

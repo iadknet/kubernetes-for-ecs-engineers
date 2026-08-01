@@ -23,6 +23,14 @@ Design principles (see also the `k8s-for-ecs-engineers` skill and
 Each module has: learning objectives, the ECS anchor, the hands-on exercise,
 the production concerns to surface, and a concrete **Done when** bar.
 
+A module is done on two axes. The **Done when** bar is the practical half. The
+knowledge half is the module's **checkpoint** in the flashcard app
+(`/checkpoint?module=M0`): a handful of synthesis questions, offered only once
+every card in the module is retained, passed only by answering all of them
+cleanly in one sitting. A failed attempt reopens the next day. Objectives that
+are purely practical are checked by the Done-when bar and get no card, so a
+small checkpoint is not a shortfall.
+
 ## The example workload
 
 From M1 on, the thing being deployed is the **[flashcard app](../flashcards/)**
@@ -44,7 +52,7 @@ retrofitting those teaches the wrong lesson. Its review state is a plain JSON
 file, which fails instructively the first time a Pod reschedules without a
 volume — that's the M3 PVC motivation, hit firsthand.
 
-The app is also how the program's **vocabulary drilling** happens: 327
+The app is also how the program's **vocabulary drilling** happens: 329
 ECS-anchored cards covering M0–M7 and the capstone, scheduled with FSRS. The
 first deck is a glossary tier — one term per card — and concept cards declare
 their vocabulary with `requires:`, so a concept is never introduced before the
@@ -78,7 +86,8 @@ few sessions to be almost entirely glossary; that is the intended shape, not a
 stall.
 
 **Done when:** `kubectl get nodes` shows one control-plane and two worker nodes
-all `Ready`, from a cluster defined in a committed config file.
+all `Ready`, from a cluster defined in a committed config file — and
+`/checkpoint?module=M0` is passed.
 
 **Teleport level fed:** tooling foundation for all levels (KIND is exactly what
 the challenge recommends).

@@ -5,7 +5,9 @@
       "Bash(gitleaks version *)",
       "Bash(hadolint --version)",
       "Bash(trivy image *)",
-      "Bash(gofmt -w internal/review/review.go)"
+      "Bash(gofmt -w internal/review/review.go)",
+      "Bash(make lint-decks *)",
+      "Bash(gofmt -w internal/review/review_test.go)"
     ]
   }
 }

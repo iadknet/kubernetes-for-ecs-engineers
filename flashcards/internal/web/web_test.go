@@ -9,6 +9,7 @@ import (
 	"strings"
 	"testing"
 	"testing/fstest"
+	"time"
 
 	flashcards "github.com/iadk/k8s-flashcards"
 	"github.com/iadk/k8s-flashcards/internal/deck"
@@ -415,5 +416,246 @@ func TestIndexDeckRowsAreNotExpanded(t *testing.T) {
 	if sum != len(lib.Cards) {
 		t.Errorf("rendered deck totals %v sum to %d, library has %d cards: the drill expansion leaked into the inventory",
 			totals, sum, len(lib.Cards))
+	}
+}
+
+// --- Checkpoints -------------------------------------------------------------
+
+const checkpointModule = `
+deck: Foundations
+module: M0
+tags: [foundations]
+cards:
+  - id: m0-one
+    q: |
+      Why three machines?
+    a: |
+      One hides everything that matters.
+  - id: m0-two
+    q: |
+      Where do Events live?
+    a: |
+      In the datastore, for about an hour.
+  - id: m0-checkpoint-split
+    checkpoint: M0
+    q: |
+      Name the control-plane/worker split.
+    a: |
+      Rubric: full credit names both sides.
+  - id: m0-checkpoint-contexts
+    checkpoint: M0
+    q: |
+      What does a kubeconfig context select?
+    a: |
+      Rubric: full credit names cluster, user and namespace.
+`
+
+func checkpointServer(t *testing.T) (http.Handler, *review.Store) {
+	t.Helper()
+
+	lib, err := deck.Load(fstest.MapFS{
+		"decks/01-foundations.yaml": {Data: []byte(checkpointModule)},
+	}, "decks")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	store, err := review.Open(filepath.Join(t.TempDir(), "review.json"), 20)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	srv, err := web.New(lib, store)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	return srv.Routes(), store
+}
+
+// masterM0 puts both ordinary M0 cards into FSRS Review state, which is the
+// precondition for the checkpoint being offered at all.
+func masterM0(t *testing.T, store *review.Store) {
+	t.Helper()
+
+	now := time.Now()
+
+	for _, id := range []string{"m0-one", "m0-two"} {
+		for i := range 10 {
+			if store.Mastered(id) {
+				break
+			}
+
+			if _, err := store.Grade(id, review.Easy, now.AddDate(0, 0, i)); err != nil {
+				t.Fatal(err)
+			}
+		}
+
+		if !store.Mastered(id) {
+			t.Fatalf("card %q never reached Review state", id)
+		}
+	}
+}
+
+// sitCheckpoint drives a whole session over HTTP, grading every card the same
+// way, and returns the final fragment.
+func sitCheckpoint(t *testing.T, h http.Handler, grade int) string {
+	t.Helper()
+
+	if rec := do(t, h, "GET", "/checkpoint?module=M0"); rec.Code != http.StatusOK {
+		t.Fatalf("opening the checkpoint = %d: %s", rec.Code, rec.Body)
+	}
+
+	body := ""
+
+	for _, id := range []string{"m0-checkpoint-split", "m0-checkpoint-contexts"} {
+		rec := do(t, h, "POST", "/checkpoint/"+id+"/grade?module=M0&g="+strconv.Itoa(grade))
+		if rec.Code != http.StatusOK {
+			t.Fatalf("grading %q = %d: %s", id, rec.Code, rec.Body)
+		}
+
+		body = rec.Body.String()
+	}
+
+	return body
+}
+
+func TestCheckpointIsLockedOnAFreshStore(t *testing.T) {
+	t.Parallel()
+
+	h, _ := checkpointServer(t)
+
+	rec := do(t, h, "GET", "/checkpoint?module=M0")
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, body: %s", rec.Code, rec.Body)
+	}
+
+	body := rec.Body.String()
+	if !strings.Contains(body, "locked") {
+		t.Errorf("a fresh checkpoint should render as locked, got: %s", body)
+	}
+
+	// The status has to name how much study is left, or "locked" is not
+	// actionable.
+	if !strings.Contains(body, "2") {
+		t.Errorf("locked status should name the unmastered prerequisite count, got: %s", body)
+	}
+
+	// And it must not leak the exam.
+	if strings.Contains(body, "control-plane/worker split") {
+		t.Error("a locked checkpoint showed its questions")
+	}
+}
+
+func TestCheckpointIsOfferedOnceTheModuleIsMastered(t *testing.T) {
+	t.Parallel()
+
+	h, store := checkpointServer(t)
+	masterM0(t, store)
+
+	body := do(t, h, "GET", "/checkpoint?module=M0").Body.String()
+	if !strings.Contains(body, "control-plane/worker split") {
+		t.Errorf("expected the first checkpoint question, got: %s", body)
+	}
+
+	if strings.Contains(body, "Rubric") {
+		t.Error("the checkpoint page leaked the answer before reveal")
+	}
+}
+
+func TestCheckpointPassIsRecordedAndShownOnTheIndex(t *testing.T) {
+	t.Parallel()
+
+	h, store := checkpointServer(t)
+	masterM0(t, store)
+
+	if got := sitCheckpoint(t, h, int(review.Good)); !strings.Contains(got, "Passed") {
+		t.Errorf("a clean sweep should report a pass, got: %s", got)
+	}
+
+	body := do(t, h, "GET", "/").Body.String()
+	if !strings.Contains(body, "Passed on "+time.Now().Format("2006-01-02")) {
+		t.Errorf("the index should show M0's checkpoint as passed, with the date; got: %s", body)
+	}
+}
+
+func TestCheckpointFailureNamesTheRetryDate(t *testing.T) {
+	t.Parallel()
+
+	h, store := checkpointServer(t)
+	masterM0(t, store)
+
+	if got := sitCheckpoint(t, h, int(review.Again)); !strings.Contains(got, "Failed") {
+		t.Errorf("an Again should fail the attempt, got: %s", got)
+	}
+
+	tomorrow := time.Now().AddDate(0, 0, 1).Format("2006-01-02")
+
+	// Both the retake page and the index have to say when it reopens.
+	for _, path := range []string{"/checkpoint?module=M0", "/"} {
+		body := do(t, h, "GET", path).Body.String()
+		if !strings.Contains(body, tomorrow) {
+			t.Errorf("GET %s should name the retry date %s, got: %s", path, tomorrow, body)
+		}
+	}
+}
+
+func TestCheckpointRejectsBadInput(t *testing.T) {
+	t.Parallel()
+
+	h, _ := checkpointServer(t)
+
+	tests := []struct {
+		name, method, target string
+		want                 int
+	}{
+		{"unknown module", "GET", "/checkpoint?module=M9", http.StatusNotFound},
+		{"no module", "GET", "/checkpoint", http.StatusNotFound},
+		{"unknown card", "POST", "/checkpoint/nope/grade?module=M0&g=3", http.StatusNotFound},
+		{"bad grade", "POST", "/checkpoint/m0-checkpoint-split/grade?module=M0&g=9", http.StatusBadRequest},
+		{"grading a locked checkpoint", "POST", "/checkpoint/m0-checkpoint-split/grade?module=M0&g=3", http.StatusConflict},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			if got := do(t, h, tt.method, tt.target).Code; got != tt.want {
+				t.Errorf("%s %s = %d, want %d", tt.method, tt.target, got, tt.want)
+			}
+		})
+	}
+}
+
+// The reveal step is what a checkpoint is graded against, rubric and all.
+func TestCheckpointRevealShowsTheRubric(t *testing.T) {
+	t.Parallel()
+
+	h, store := checkpointServer(t)
+	masterM0(t, store)
+
+	if rec := do(t, h, "GET", "/checkpoint?module=M0"); rec.Code != http.StatusOK {
+		t.Fatal(rec.Body)
+	}
+
+	rec := do(t, h, "POST", "/checkpoint/m0-checkpoint-split/reveal?module=M0")
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, body: %s", rec.Code, rec.Body)
+	}
+
+	if !strings.Contains(rec.Body.String(), "Rubric") {
+		t.Errorf("reveal should show the answer and its rubric, got: %s", rec.Body)
+	}
+}
+
+// An unpassed checkpoint must never reach the drill.
+func TestCheckpointCardsAreNotDrilledBeforeAPass(t *testing.T) {
+	t.Parallel()
+
+	h, store := checkpointServer(t)
+	masterM0(t, store)
+
+	body := do(t, h, "GET", "/drill?module=M0").Body.String()
+	if strings.Contains(body, "control-plane/worker split") {
+		t.Error("the drill served an unpassed checkpoint card")
 	}
 }

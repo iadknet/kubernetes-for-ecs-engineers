@@ -1,6 +1,6 @@
 # Module Checkpoints — Technical Spec
 
-**Status**: ⏳ PLANNED
+**Status**: ✅ COMPLETE
 **Last updated**: 2026-07-31
 
 ---
@@ -119,7 +119,7 @@ self-assessed feeling of readiness.
 
 ## Implementation Phases
 
-### Phase 1: Schema and validation — ⏳ PLANNED
+### Phase 1: Schema and validation — ✅ COMPLETE
 
 **Objective**: Checkpoint cards parse, expand to prerequisite edges, and are
 excluded from drill expansion.
@@ -130,15 +130,15 @@ on separate branches rather than interleaving.
 
 **Tasks**:
 
-- [ ] Add failing tests for `Checkpoint` parsing, module-edge expansion,
+- [x] Add failing tests for `Checkpoint` parsing, module-edge expansion,
       unknown-module and term-conflict rejection — `internal/deck/deck_test.go`
-- [ ] Implement `Checkpoint` on `Card` with load-time expansion and validation
-- [ ] Add a `term:`+`checkpoint:` conflict seed to the fuzz corpus —
+- [x] Implement `Checkpoint` on `Card` with load-time expansion and validation
+- [x] Add a `term:`+`checkpoint:` conflict seed to the fuzz corpus —
       `internal/deck/fuzz_test.go`
-- [ ] Add failing tests that `WithPrerequisites` never emits or expands
+- [x] Add failing tests that `WithPrerequisites` never emits or expands
       checkpoint cards — `internal/deck/glossary_test.go`
-- [ ] Exclude checkpoint cards in `WithPrerequisites`
-- [ ] Sync `README.md` deck/schema notes
+- [x] Exclude checkpoint cards in `WithPrerequisites`
+- [x] Sync `README.md` deck/schema notes
 
 **Deliverables**:
 
@@ -146,27 +146,27 @@ on separate branches rather than interleaving.
 - Exclusion implemented in `internal/deck/glossary.go`
 - `README.md` updated
 
-### Phase 2: Sessions, state, and UI — ⏳ PLANNED
+### Phase 2: Sessions, state, and UI — ✅ COMPLETE
 
 **Objective**: A checkpoint can be taken, passed, failed, retried next day, and
 its status is visible.
 
 **Tasks**:
 
-- [ ] Add failing tests for attempt state: clean sweep passes, any Again/Hard
+- [x] Add failing tests for attempt state: clean sweep passes, any Again/Hard
       fails, next-day retake allowed, same-day blocked, passed cards enter FSRS
       rotation, checkpoint cards absent from `Next`/`Stats` before a pass —
       `internal/review/review_test.go`
-- [ ] Add failing test for the `stateVersion` 1→2 migration over a committed v1
+- [x] Add failing test for the `stateVersion` 1→2 migration over a committed v1
       fixture — `internal/review/testdata/state_v1.json`, exercised from
       `internal/review/review_test.go`. The fixture is a real captured v1 file,
       not generated in-test; generating it would defeat the point.
-- [ ] Implement attempt state, session grading, and the migration
-- [ ] Add failing tests for `/checkpoint?module=M0`: offered only when
+- [x] Implement attempt state, session grading, and the migration
+- [x] Add failing tests for `/checkpoint?module=M0`: offered only when
       prerequisites mastered, and the four index status states —
       `internal/web/web_test.go`
-- [ ] Implement the route and index status line
-- [ ] Sync `README.md` ("Drilling the vocabulary" / study-modes text) and
+- [x] Implement the route and index status line
+- [x] Sync `README.md` ("Drilling the vocabulary" / study-modes text) and
       `docs/curriculum.md` (checkpoint as each module's knowledge bar)
 
 **Deliverables**:
@@ -175,7 +175,7 @@ its status is visible.
 - `/checkpoint` route and index status in `internal/web/web.go`
 - `README.md` and `docs/curriculum.md` updated
 
-### Phase 3: M0 checkpoint content — ⏳ PLANNED
+### Phase 3: M0 checkpoint content — ✅ COMPLETE
 
 **Objective**: M0 has a real checkpoint; later modules author theirs as each
 module is reached (not this spec's work).
@@ -192,12 +192,12 @@ checkpoint cards are excluded from the order-sensitive fresh queue.
 
 **Tasks**:
 
-- [ ] Author M0 checkpoint cards, one per non-practical M0 learning objective
+- [x] Author M0 checkpoint cards, one per non-practical M0 learning objective
       in `docs/curriculum.md`, with rubric lines — in the M0 deck file
-- [ ] Verify a full pass and a full failure against a pre-mastered fixture
+- [x] Verify a full pass and a full failure against a pre-mastered fixture
       store, driving the session through the exported API —
       `internal/review/review_test.go`
-- [ ] Sync the card count in `README.md`
+- [x] Sync the card count in `README.md`
 
 **Deliverables**:
 
@@ -231,36 +231,99 @@ checkpoint cards are excluded from the order-sensitive fresh queue.
 
 ## Technical Implementation Details
 
-**To be filled in as the code is written.**
+**Checkpoint edges are synthesized at load time, over the decks rather than
+over the flattened card list.** `Load` now parses every deck, runs
+`expandCheckpoints`, and only then flattens `Library.Cards` and builds `byID`.
+Expanding after the flatten would leave `Library.Decks` and `Library.Cards`
+holding different `Requires` for the same card — the index page reads one and
+the drill the other. `TestCheckpointExpansionReachesTheDeckCards` pins that.
+
+**A checkpoint card is never an edge target.** `expandCheckpoints` skips
+checkpoint cards when collecting a module's members, so two exams in the same
+module cannot require each other (a load-time cycle) and an exam is never gated
+on another exam.
+
+**`WithPrerequisites` treats checkpoint cards as opaque, not as removable.**
+They are never *added* as prerequisites, and they are never *walked through* —
+a checkpoint's edges span its whole module, so expanding one would turn any
+scope containing it into a full-module drill. A checkpoint card present in the
+input still comes back in the output: the function is append-only by contract,
+and withholding an unpassed exam from the queue is the review layer's job, not
+the deck layer's. That is the one place where "never emits checkpoint cards" is
+read narrowly, and it is why `Store.withheld` exists.
+
+**Grades are buffered for the duration of the attempt.** `GradeCheckpoint`
+records into `checkpointAttempt.Grades` and only replays them into FSRS —
+through the new `Store.schedule`, which skips the day counters — once the last
+card completes a clean sweep. A failed attempt therefore leaves no FSRS trace
+at all; without buffering, the exam would enter the drill queue through the
+back door of a failure.
+
+**`Store.schedule` is `Grade` minus the counters.** `Grade` now increments
+`Reviews`/`NewSeen` and delegates the FSRS step to it. That split is what makes
+"a checkpoint is an event, not a review day" true of the streak as well as of
+`Stats`.
+
+**Unpassed checkpoint cards leave `Stats` entirely, `Total` included.** The
+spec asked for exclusion from New/Due; excluding them from `Total` too is what
+keeps the buckets summing to `Total`, which the index deck-row test relies on.
+
+**Availability is queryable, and the sentinel is the backstop.**
+`CheckpointStatus` is what the route and the index render from.
+`ErrCheckpointUnavailable` exists so a stale tab or a hand-crafted POST cannot
+erase a recorded pass; the route maps it to `409 Conflict` rather than
+depending on it for flow control.
+
+**Days are compared as `YYYY-MM-DD` strings** via the existing `day()` helper,
+end to end — persisted, compared, and rendered — so no timezone conversion can
+slip in between recording an attempt and deciding whether the cool-down has
+passed.
+
+**The M0 checkpoint is two cards**, one per non-practical M0 objective: the
+control-plane/worker split and kubeconfig contexts. The other two objectives
+(install the toolchain, stand up a multi-node cluster) are practical and are
+checked by M0's Done-when bar. Both cards carry explicit `requires:` for the
+glossary terms they use, because the synthesized module edges only cover M0
+cards and the glossary lint demands direct edges.
 
 ### Key Files
 
-- `flashcards/internal/deck/deck.go` — schema and module-edge expansion
-- `flashcards/internal/review/review.go` — attempt state and migration
-- `flashcards/internal/web/web.go` — `/checkpoint` route and status
+- `flashcards/internal/deck/deck.go` — `Card.Checkpoint`, `expandCheckpoints`,
+  `Library.Checkpoints`
+- `flashcards/internal/deck/glossary.go` — checkpoint exclusion in
+  `WithPrerequisites`
+- `flashcards/internal/review/review.go` — attempt state, session grading,
+  `CheckpointStatus`, the v1→v2 migration
+- `flashcards/internal/web/web.go` — `/checkpoint` routes and the index status
+- `flashcards/internal/web/templates/checkpoint.html`,
+  `checkpoint-fragments.html` — the sitting and the shared status line
+- `flashcards/internal/review/testdata/state_v1.json` — the captured v1 fixture
+- `flashcards/decks/01-foundations.yaml` — the M0 checkpoint cards
 
 ### Implementation Patterns
 
 The schema addition:
 
 ```yaml
-- id: m0-checkpoint-pending-pod
+- id: m0-checkpoint-wrong-cluster
   checkpoint: M0
   q: |
-    A Pod has been Pending for five minutes and `kubectl describe pod` shows
-    no events. Walk the diagnosis: which component has not acted, and what are
-    the two most likely reasons?
+    A command you have run a hundred times returns "no resources found"...
   a: |
-    No events means the scheduler has not placed it...
-    Rubric: full credit = names the scheduler, plus both no-fit-node and
-    scheduler-not-running.
+    A context selects three things: cluster, user, namespace...
+
+    *Rubric: full credit = all three parts of the context, the namespace named
+    as the usual cause, and both commands.*
+  requires: [term-kubeconfig, term-cluster, term-namespace]
 ```
+
+`requires:` here is *additive*: `deck.Load` adds an edge to every ordinary M0
+card on top of it.
 
 ### Important Notes
 
-- If the four UI states become an iota enum, the zero value must be a sentinel
-  (`CheckpointUnknown` at 0), not `Locked` — an uninitialized status must not
-  read as a deliberate one.
+- The four UI states are an iota enum with `CheckpointUnknown` at 0, so an
+  uninitialized status reads as "no exam yet" rather than as "locked".
 - `Store.Mastered` keeps its existing name (`internal/review/review.go:217`)
   rather than the `Is`-prefixed form the naming skill prefers for boolean
   predicates. Matching the shipped code beats renaming mid-implementation.
@@ -276,24 +339,47 @@ Every criterion below is demonstrated against a fixture store with pre-mastered
 M0 state and an injected clock — not by waiting out real FSRS intervals, which
 would take days and tempt a faked pass.
 
-- [ ] `/checkpoint?module=M0` is locked on a fresh store and names the number
+- [x] `/checkpoint?module=M0` is locked on a fresh store and names the number
       of unmastered prerequisite cards
-- [ ] With all M0 cards mastered, a session grading every checkpoint card
+- [x] With all M0 cards mastered, a session grading every checkpoint card
       Good/Easy records a pass and shows the pass date on the index
-- [ ] A session with one Again records a failure; retake is refused the same
+- [x] A session with one Again records a failure; retake is refused the same
       day and offered the next
-- [ ] Passed checkpoint cards subsequently appear in the normal drill queue
-- [ ] Checkpoint cards never appear in a module drill, or in New/Due/Locked
+- [x] Passed checkpoint cards subsequently appear in the normal drill queue
+- [x] Checkpoint cards never appear in a module drill, or in New/Due/Locked
       counts, before a pass
-- [ ] An existing v1 state file loads, migrates to v2, and loses no review
+- [x] An existing v1 state file loads, migrates to v2, and loses no review
       history
-- [ ] `make check` passes
+- [x] `make check` passes
 
 ---
 
 ## Troubleshooting Guide
 
-**Not applicable** — no failures encountered yet.
+**`requires cycle` at startup after adding a checkpoint card.** The card names
+a module it is itself an ordinary member of, or two checkpoint cards were made
+to require each other by hand. Checkpoint cards are excluded from each other's
+synthesized edges, so the cycle can only come from an explicit `requires:`
+entry — remove it.
+
+**`make lint-decks` fails on a new checkpoint card.** The synthesized edges
+cover the module's cards, not the glossary. Every glossary term the question or
+answer uses still needs its own explicit `requires:` entry, exactly as for an
+ordinary card.
+
+**`/checkpoint?module=M1` returns 404.** That module has no checkpoint cards
+yet. Authoring them is part of reaching the module, not part of this spec; the
+route 404s rather than offering an empty exam that would "pass" on the first
+click.
+
+**The checkpoint says locked but the module drill says nothing is due.** Locked
+counts prerequisite cards that are not in FSRS `Review` state — scheduled but
+not yet retained is still unmastered. The count shrinks as reviews come due
+over the following days; there is nothing to do but wait and drill.
+
+**A grade returns 409 Conflict.** No attempt is open: the tab is stale, the
+checkpoint was already passed, or the cool-down is in force. Reload
+`/checkpoint?module=…`, which renders the current status.
 
 ---
 

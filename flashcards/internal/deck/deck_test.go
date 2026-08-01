@@ -115,6 +115,16 @@ func TestParseRejectsMalformedDecks(t *testing.T) {
 			yaml:    "deck: D\ncards:\n  - id: a\n    aliases: [Pod]\n    q: q\n    a: a\n",
 			wantErr: "has 'aliases' but no 'term'",
 		},
+		{
+			name:    "a card is both a term and a checkpoint",
+			yaml:    "deck: D\nmodule: M0\ncards:\n  - id: a\n    term: Pod\n    checkpoint: M0\n    q: q\n    a: a\n",
+			wantErr: "cannot be both a glossary card and a checkpoint card",
+		},
+		{
+			name:    "a checkpoint names a module with no cards",
+			yaml:    "deck: D\nmodule: M0\ncards:\n  - id: a\n    checkpoint: M9\n    q: q\n    a: a\n",
+			wantErr: `checkpoint card "a" names module "M9", which has no cards`,
+		},
 	}
 
 	for _, tt := range tests {
@@ -255,6 +265,103 @@ func TestCycleErrorNamesTheCycle(t *testing.T) {
 	for _, want := range []string{"one", "two"} {
 		if !strings.Contains(err.Error(), want) {
 			t.Errorf("cycle error %q does not name card %q", err, want)
+		}
+	}
+}
+
+// A checkpoint card is the module's exam, so it depends on the whole module.
+// Expanding that at load time keeps one rule for prerequisites: everything is a
+// `requires:` edge, and the existing dangling/cycle validation covers it.
+func TestCheckpointExpandsToModuleEdges(t *testing.T) {
+	t.Parallel()
+
+	const glossary = `
+deck: Glossary
+cards:
+  - id: term-pod
+    term: Pod
+    q: q
+    a: a
+`
+
+	const module = `
+deck: Foundations
+module: M0
+cards:
+  - id: m0-one
+    q: q
+    a: a
+    requires: [term-pod]
+  - id: m0-two
+    q: q
+    a: a
+  - id: m0-checkpoint
+    checkpoint: M0
+    q: q
+    a: a
+    requires: [term-pod]
+  - id: m0-checkpoint-two
+    checkpoint: M0
+    q: q
+    a: a
+`
+
+	lib, err := deck.Load(fstest.MapFS{
+		"decks/00-glossary.yaml":    {Data: []byte(glossary)},
+		"decks/01-foundations.yaml": {Data: []byte(module)},
+	}, "decks")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	c, ok := lib.Get(checkpointCard)
+	if !ok {
+		t.Fatal("no checkpoint card")
+	}
+
+	// Explicit edges are additive, and the two checkpoint cards must not require
+	// each other or themselves — that would be a cycle, or an exam gated on an
+	// exam.
+	want := map[string]bool{"term-pod": true, moduleCard: true, "m0-two": true}
+
+	got := map[string]bool{}
+	for _, id := range c.Requires {
+		got[id] = true
+	}
+
+	if len(got) != len(want) {
+		t.Fatalf("requires = %v, want %v", c.Requires, want)
+	}
+
+	for id := range want {
+		if !got[id] {
+			t.Errorf("checkpoint card does not require %q; got %v", id, c.Requires)
+		}
+	}
+
+	// Non-checkpoint cards keep exactly what they declared.
+	if one, _ := lib.Get(moduleCard); len(one.Requires) != 1 || one.Requires[0] != "term-pod" {
+		t.Errorf("m0-one.Requires = %v, want [term-pod]", one.Requires)
+	}
+}
+
+// The Deck view of a card must not disagree with the Library view, or the index
+// page and the drill would be reading two different graphs.
+func TestCheckpointExpansionReachesTheDeckCards(t *testing.T) {
+	t.Parallel()
+
+	lib, err := loadOne(t, "deck: D\nmodule: M0\ncards:\n  - id: a\n    q: q\n    a: a\n  - id: cp\n    checkpoint: M0\n    q: q\n    a: a\n")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	for _, c := range lib.Decks[0].Cards {
+		if c.ID != "cp" {
+			continue
+		}
+
+		if len(c.Requires) != 1 || c.Requires[0] != "a" {
+			t.Errorf("deck view of the checkpoint card has Requires = %v, want [a]", c.Requires)
 		}
 	}
 }

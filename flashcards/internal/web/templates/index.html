@@ -32,6 +32,13 @@
   </tbody>
 </table>
 
+{{if .Checkpoints}}
+<h3 style="font-size:.8125rem;text-transform:uppercase;letter-spacing:.06em;color:var(--muted);margin-top:2rem">Checkpoints</h3>
+{{range .Checkpoints}}
+<div class="card" style="padding:1rem 1.25rem">{{template "checkpoint-status" .}}</div>
+{{end}}
+{{end}}
+
 <p class="muted small" style="margin-top:2rem">
   Grades are scheduled with FSRS: <em>Again</em> brings a card back within
   minutes, <em>Easy</em> pushes it out days. Review state lives in a JSON file —

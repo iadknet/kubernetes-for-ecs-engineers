@@ -1,0 +1,49 @@
+{
+  "version": 1,
+  "cards": {
+    "m0-control-plane-components": {
+      "Due": "2026-08-07T09:00:00Z",
+      "Stability": 15.69105,
+      "Difficulty": 3.2245015893713678,
+      "ElapsedDays": 0,
+      "ScheduledDays": 16,
+      "Reps": 1,
+      "Lapses": 0,
+      "State": 2,
+      "LastReview": "2026-07-22T09:00:00Z"
+    },
+    "term-cluster": {
+      "Due": "2026-08-05T09:00:00Z",
+      "Stability": 15.69105,
+      "Difficulty": 3.2245015893713678,
+      "ElapsedDays": 0,
+      "ScheduledDays": 16,
+      "Reps": 1,
+      "Lapses": 0,
+      "State": 2,
+      "LastReview": "2026-07-20T09:00:00Z"
+    },
+    "term-pod": {
+      "Due": "2026-08-18T09:00:00Z",
+      "Stability": 24.909393567471568,
+      "Difficulty": 3.2245015893713678,
+      "ElapsedDays": 3,
+      "ScheduledDays": 25,
+      "Reps": 2,
+      "Lapses": 0,
+      "State": 2,
+      "LastReview": "2026-07-24T09:00:00Z"
+    }
+  },
+  "reviewsPerDay": {
+    "2026-07-20": 1,
+    "2026-07-21": 1,
+    "2026-07-22": 1,
+    "2026-07-24": 1
+  },
+  "newPerDay": {
+    "2026-07-20": 1,
+    "2026-07-21": 1,
+    "2026-07-22": 1
+  }
+}

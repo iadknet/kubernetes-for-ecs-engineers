@@ -11,6 +11,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"sort"
@@ -33,14 +34,32 @@ const (
 	Easy  = fsrs.Easy  // trivial
 )
 
-const stateVersion = 1
+// stateVersion 2 added the per-module checkpoint attempts map. Older files are
+// migrated in Open; nothing in a v1 file is rewritten.
+const stateVersion = 2
 
 type persisted struct {
-	Version int                  `json:"version"`
-	Cards   map[string]fsrs.Card `json:"cards"`
-	Reviews map[string]int       `json:"reviewsPerDay"`
-	NewSeen map[string]int       `json:"newPerDay"`
+	Version     int                          `json:"version"`
+	Cards       map[string]fsrs.Card         `json:"cards"`
+	Reviews     map[string]int               `json:"reviewsPerDay"`
+	NewSeen     map[string]int               `json:"newPerDay"`
+	Checkpoints map[string]checkpointAttempt `json:"checkpoints"`
 }
+
+// checkpointAttempt is one module's most recent checkpoint sitting.
+//
+// Grades are buffered rather than applied as they are given: a failed attempt
+// must leave no FSRS trace, or a checkpoint card would enter the drill queue
+// through the back door of a failure. On a pass they are replayed as the cards'
+// first reviews.
+type checkpointAttempt struct {
+	Day    string           `json:"day"`
+	Grades map[string]Grade `json:"grades"`
+	Failed bool             `json:"failed"`
+	Done   bool             `json:"done"`
+}
+
+func (a checkpointAttempt) passed() bool { return a.Done && !a.Failed }
 
 // Store holds scheduling state for every card that has been reviewed at least
 // once. Cards absent from the store are "new".
@@ -60,10 +79,11 @@ func Open(path string, newPerDay int) (*Store, error) {
 		fsrs:      fsrs.NewFSRS(fsrs.DefaultParam()),
 		newPerDay: newPerDay,
 		st: persisted{
-			Version: stateVersion,
-			Cards:   map[string]fsrs.Card{},
-			Reviews: map[string]int{},
-			NewSeen: map[string]int{},
+			Version:     stateVersion,
+			Cards:       map[string]fsrs.Card{},
+			Reviews:     map[string]int{},
+			NewSeen:     map[string]int{},
+			Checkpoints: map[string]checkpointAttempt{},
 		},
 	}
 
@@ -92,7 +112,34 @@ func Open(path string, newPerDay int) (*Store, error) {
 		s.st.NewSeen = map[string]int{}
 	}
 
+	s.migrate(path)
+
 	return s, nil
+}
+
+// migrate brings an older state file up to stateVersion. It only ever adds
+// fields: card entries and day counters are never rewritten, because a lost
+// review history is the one failure of this store that cannot be undone.
+func (s *Store) migrate(path string) {
+	from := s.st.Version
+	if from >= stateVersion {
+		s.st.Checkpoints = orEmpty(s.st.Checkpoints)
+		return
+	}
+
+	s.st.Checkpoints = orEmpty(s.st.Checkpoints)
+	s.st.Version = stateVersion
+
+	slog.Info("migrated review state",
+		"path", path, "from", from, "to", stateVersion, "cards", len(s.st.Cards))
+}
+
+func orEmpty(m map[string]checkpointAttempt) map[string]checkpointAttempt {
+	if m == nil {
+		return map[string]checkpointAttempt{}
+	}
+
+	return m
 }
 
 func day(t time.Time) string { return t.Format("2006-01-02") }
@@ -106,21 +153,33 @@ func (s *Store) Grade(id string, g Grade, now time.Time) (time.Time, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	card, seen := s.st.Cards[id]
-	if !seen {
-		card = fsrs.NewCard()
+	if _, seen := s.st.Cards[id]; !seen {
 		s.st.NewSeen[day(now)]++
 	}
 
-	next := s.fsrs.Next(card, now, g).Card
-	s.st.Cards[id] = next
 	s.st.Reviews[day(now)]++
 
+	next := s.schedule(id, g, now)
 	if err := s.save(); err != nil {
 		return time.Time{}, err
 	}
 
 	return next.Due, nil
+}
+
+// schedule advances a card's FSRS state without touching the day counters.
+// Checkpoint passes replay their grades through here: a checkpoint is an event,
+// not a review day, so it must not move the streak or ReviewsToday.
+func (s *Store) schedule(id string, g Grade, now time.Time) fsrs.Card {
+	card, seen := s.st.Cards[id]
+	if !seen {
+		card = fsrs.NewCard()
+	}
+
+	next := s.fsrs.Next(card, now, g).Card
+	s.st.Cards[id] = next
+
+	return next
 }
 
 // save writes the state atomically: temp file in the same directory, then
@@ -180,6 +239,10 @@ func (s *Store) Next(cards []deck.Card, now time.Time) (deck.Card, bool) {
 	)
 
 	for _, c := range cards {
+		if s.withheld(c) {
+			continue
+		}
+
 		st, seen := s.st.Cards[c.ID]
 		switch {
 		case !seen:
@@ -291,8 +354,15 @@ func (s *Store) Stats(cards []deck.Card, now time.Time) Stats {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	out := Stats{Total: len(cards), ReviewsToday: s.st.Reviews[day(now)]}
+	out := Stats{ReviewsToday: s.st.Reviews[day(now)]}
+
 	for _, c := range cards {
+		if s.withheld(c) {
+			continue
+		}
+
+		out.Total++
+
 		st, seen := s.st.Cards[c.ID]
 		if !seen {
 			out.New++
@@ -318,6 +388,221 @@ func (s *Store) Stats(cards []deck.Card, now time.Time) Stats {
 	}
 
 	return out
+}
+
+// --- Checkpoints -------------------------------------------------------------
+
+// ErrCheckpointUnavailable is returned when a checkpoint session is started or
+// graded while the module's checkpoint is not being offered — locked behind an
+// unmastered module, already passed, or inside its post-failure cool-down.
+//
+// Callers are expected to read CheckpointStatus and never provoke this; it is
+// the backstop that keeps a hand-crafted request from erasing a recorded pass.
+var ErrCheckpointUnavailable = errors.New("checkpoint is not available")
+
+// CheckpointState is where one module's checkpoint stands.
+type CheckpointState int
+
+// The checkpoint states, with a sentinel at zero: an uninitialized status must
+// not read as a deliberate one.
+const (
+	CheckpointUnknown CheckpointState = iota
+	CheckpointLocked
+	CheckpointReady
+	CheckpointFailed
+	CheckpointPassed
+)
+
+func (c CheckpointState) String() string {
+	switch c {
+	case CheckpointLocked:
+		return "locked"
+	case CheckpointReady:
+		return "ready"
+	case CheckpointFailed:
+		return "failed"
+	case CheckpointPassed:
+		return "passed"
+	case CheckpointUnknown:
+		return "unknown"
+	default:
+		return "unknown"
+	}
+}
+
+// CheckpointStatus is everything the UI needs to render one module's checkpoint
+// line, and everything a route needs to decide whether to offer a session.
+type CheckpointStatus struct {
+	Module string
+	State  CheckpointState
+	// Unmastered counts the prerequisite cards still to be retained. Only
+	// meaningful while Locked.
+	Unmastered int
+	// Day is the recorded attempt's date, and RetryOn the earliest day a failed
+	// attempt may be retaken. Both are YYYY-MM-DD, the same form the day
+	// counters use, so no timezone slips in between recording and comparing.
+	Day     string
+	RetryOn string
+}
+
+// Locked reports whether the checkpoint is still gated on retention, for
+// templates that would otherwise compare against a string.
+func (c CheckpointStatus) Locked() bool { return c.State == CheckpointLocked }
+
+// Available reports whether a session can be sat right now.
+func (c CheckpointStatus) Available() bool { return c.State == CheckpointReady }
+
+// CheckpointStatus reports where module's checkpoint stands. cards is that
+// module's checkpoint cards; an empty set means the module has no exam yet.
+func (s *Store) CheckpointStatus(module string, cards []deck.Card, now time.Time) CheckpointStatus {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	return s.checkpointStatus(module, cards, now)
+}
+
+func (s *Store) checkpointStatus(module string, cards []deck.Card, now time.Time) CheckpointStatus {
+	out := CheckpointStatus{Module: module}
+	if len(cards) == 0 {
+		return out
+	}
+
+	attempt := s.st.Checkpoints[module]
+	if attempt.passed() {
+		out.State, out.Day = CheckpointPassed, attempt.Day
+		return out
+	}
+
+	// Prerequisite mastery is checked before the cool-down, so a checkpoint whose
+	// module has lapsed reads as locked rather than as retakeable.
+	seen := map[string]bool{}
+
+	for _, c := range cards {
+		for _, id := range c.Requires {
+			if seen[id] || s.mastered(id) {
+				continue
+			}
+
+			seen[id] = true
+			out.Unmastered++
+		}
+	}
+
+	if out.Unmastered > 0 {
+		out.State = CheckpointLocked
+		return out
+	}
+
+	// A failed attempt holds the checkpoint shut for the rest of the day. Same-day
+	// retakes would test short-term memory of the answer just read.
+	if attempt.Done && attempt.Failed && attempt.Day == day(now) {
+		out.State = CheckpointFailed
+		out.Day = attempt.Day
+		out.RetryOn = day(now.AddDate(0, 0, 1))
+
+		return out
+	}
+
+	out.State = CheckpointReady
+
+	return out
+}
+
+// StartCheckpoint begins an attempt over the module's checkpoint cards, or
+// resumes one already in progress today.
+func (s *Store) StartCheckpoint(module string, cards []deck.Card, now time.Time) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if s.checkpointStatus(module, cards, now).State != CheckpointReady {
+		return fmt.Errorf("starting checkpoint %s: %w", module, ErrCheckpointUnavailable)
+	}
+
+	if a, ok := s.st.Checkpoints[module]; ok && !a.Done && a.Day == day(now) {
+		return nil // resume; re-entering the page must not discard the answers so far
+	}
+
+	s.st.Checkpoints[module] = checkpointAttempt{Day: day(now), Grades: map[string]Grade{}}
+
+	if err := s.save(); err != nil {
+		return err
+	}
+
+	return nil
+}
+
+// NextCheckpoint returns the next card of the attempt in progress. A failed
+// attempt keeps handing out cards: the sitting is a full diagnostic, so the
+// remaining questions are still worth seeing.
+func (s *Store) NextCheckpoint(module string, cards []deck.Card) (deck.Card, bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	attempt, ok := s.st.Checkpoints[module]
+	if !ok || attempt.Done {
+		return deck.Card{}, false
+	}
+
+	for _, c := range cards {
+		if _, graded := attempt.Grades[c.ID]; !graded {
+			return c, true
+		}
+	}
+
+	return deck.Card{}, false
+}
+
+// GradeCheckpoint records one answer in the attempt in progress. Any Again or
+// Hard fails the attempt immediately; grading the last card completes it, and a
+// clean sweep replays the buffered grades as the checkpoint cards' first FSRS
+// reviews.
+func (s *Store) GradeCheckpoint(module, id string, g Grade, cards []deck.Card, now time.Time) error {
+	if g < fsrs.Again || g > fsrs.Easy {
+		return fmt.Errorf("invalid grade %d", g)
+	}
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	attempt, ok := s.st.Checkpoints[module]
+	if !ok || attempt.Done {
+		return fmt.Errorf("grading checkpoint %s: %w", module, ErrCheckpointUnavailable)
+	}
+
+	attempt.Grades[id] = g
+	if g < Good {
+		attempt.Failed = true
+	}
+
+	if len(attempt.Grades) >= len(cards) {
+		attempt.Done = true
+	}
+
+	s.st.Checkpoints[module] = attempt
+
+	// Only a pass puts the cards into rotation. A failed attempt must leave no
+	// FSRS trace, or the exam would enter the drill queue through the back door
+	// of a failure.
+	if attempt.passed() {
+		for _, c := range cards {
+			if buffered, graded := attempt.Grades[c.ID]; graded {
+				s.schedule(c.ID, buffered, now)
+			}
+		}
+	}
+
+	if err := s.save(); err != nil {
+		return err
+	}
+
+	return nil
+}
+
+// withheld reports whether a card is outside the daily review economy: an
+// unpassed checkpoint card. It is excluded from every Stats bucket, Total
+// included, so the buckets still sum. Cram is deliberately unaffected.
+func (s *Store) withheld(c deck.Card) bool {
+	return c.Checkpoint != "" && !s.st.Checkpoints[c.Checkpoint].passed()
 }
 
 // Streak counts consecutive days with at least one review, ending today or

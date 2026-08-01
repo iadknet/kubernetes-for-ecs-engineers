@@ -5,10 +5,12 @@ package web
 import (
 	"bytes"
 	"embed"
+	"errors"
 	"fmt"
 	"html/template"
 	"net/http"
 	"net/url"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -36,6 +38,7 @@ type Server struct {
 func New(lib *deck.Library, store *review.Store) (*Server, error) {
 	tmpl, err := template.New("").Funcs(template.FuncMap{
 		"until": humanUntil,
+		"add":   func(a, b int) int { return a + b },
 	}).ParseFS(assets, "templates/*.html")
 	if err != nil {
 		return nil, fmt.Errorf("parsing templates: %w", err)
@@ -57,6 +60,9 @@ func (s *Server) Routes() *http.ServeMux {
 	mux.HandleFunc("GET /drill", s.handleDrill)
 	mux.HandleFunc("POST /drill/{id}/reveal", s.handleReveal)
 	mux.HandleFunc("POST /drill/{id}/grade", s.handleGrade)
+	mux.HandleFunc("GET /checkpoint", s.handleCheckpoint)
+	mux.HandleFunc("POST /checkpoint/{id}/reveal", s.handleCheckpointReveal)
+	mux.HandleFunc("POST /checkpoint/{id}/grade", s.handleCheckpointGrade)
 	mux.HandleFunc("GET /browse", s.handleBrowse)
 	mux.HandleFunc("GET /healthz", s.handleHealthz)
 	mux.HandleFunc("GET /readyz", s.handleReadyz)
@@ -249,11 +255,23 @@ func (s *Server) handleIndex(w http.ResponseWriter, _ *http.Request) {
 		})
 	}
 
+	// Only modules that actually have an exam get a status line. The rest are
+	// authored as each module is reached, and an empty line would read as a gap
+	// rather than as work not yet due.
+	var checkpoints []review.CheckpointStatus
+
+	for _, m := range s.lib.Modules() {
+		if cards := s.lib.Checkpoints(m); len(cards) > 0 {
+			checkpoints = append(checkpoints, s.store.CheckpointStatus(m, cards, now))
+		}
+	}
+
 	s.render(w, "index.html", map[string]any{
-		"Decks":  rows,
-		"Total":  s.store.Stats(s.lib.Cards, now),
-		"Streak": s.store.Streak(now),
-		"Tags":   s.lib.Tags(),
+		"Decks":       rows,
+		"Total":       s.store.Stats(s.lib.Cards, now),
+		"Streak":      s.store.Streak(now),
+		"Tags":        s.lib.Tags(),
+		"Checkpoints": checkpoints,
 	})
 }
 
@@ -321,6 +339,164 @@ func (s *Server) handleGrade(w http.ResponseWriter, r *http.Request) {
 	}
 
 	s.renderFragment(w, "card-front", s.view(card, f))
+}
+
+// checkpointView is one module's checkpoint prepared for rendering: its status
+// line, and the card being sat if a session is in progress.
+type checkpointView struct {
+	Status  review.CheckpointStatus
+	HasCard bool
+	Card    deck.Card
+	Q       template.HTML
+	A       template.HTML
+	ECS     template.HTML
+	// Answered and Total track progress through the sitting, so a checkpoint
+	// shows how much of the exam is left rather than an open-ended queue.
+	Answered int
+	Total    int
+}
+
+// URL builds an action URL for the card being sat, carrying the module so the
+// htmx fragment requests stay inside the same attempt.
+func (v checkpointView) URL(action string) template.URL {
+	//nolint:gosec // G203: the card id goes through url.PathEscape and the module through url.Values.
+	return template.URL("/checkpoint/" + url.PathEscape(v.Card.ID) + "/" + action +
+		"?" + url.Values{"module": {v.Status.Module}}.Encode())
+}
+
+// GradeURL is URL("grade") with the grade appended.
+func (v checkpointView) GradeURL(g int) template.URL {
+	//nolint:gosec // G203: g is an int rendered by strconv.Itoa; no attacker-controlled text.
+	return v.URL("grade") + template.URL("&g="+strconv.Itoa(g))
+}
+
+// checkpointCards resolves the module in the query to its exam. A module with no
+// checkpoint cards is a 404 rather than an empty page: there is nothing to sit,
+// and an empty exam that "passes" would be a silently useless gate.
+func (s *Server) checkpointCards(w http.ResponseWriter, r *http.Request) (string, []deck.Card, bool) {
+	module := r.URL.Query().Get("module")
+
+	cards := s.lib.Checkpoints(module)
+	if len(cards) == 0 {
+		http.Error(w, "no checkpoint for module: "+module, http.StatusNotFound)
+		return "", nil, false
+	}
+
+	return module, cards, true
+}
+
+func (s *Server) checkpointView(module string, cards []deck.Card) checkpointView {
+	v := checkpointView{
+		Status: s.store.CheckpointStatus(module, cards, s.now()),
+		Total:  len(cards),
+	}
+
+	card, ok := s.store.NextCheckpoint(module, cards)
+	if !ok {
+		v.Answered = v.Total
+		return v
+	}
+
+	v.HasCard = true
+	v.Card = card
+	v.Q = s.markdown(card.Q)
+	v.A = s.markdown(card.A)
+	v.ECS = s.markdown(card.ECS)
+
+	for i, c := range cards {
+		if c.ID == card.ID {
+			v.Answered = i
+			break
+		}
+	}
+
+	return v
+}
+
+// handleCheckpoint opens a module's checkpoint: the sitting itself when it is
+// offered, otherwise the status explaining why it is not.
+func (s *Server) handleCheckpoint(w http.ResponseWriter, r *http.Request) {
+	module, cards, ok := s.checkpointCards(w, r)
+	if !ok {
+		return
+	}
+
+	// Availability is queryable state, so the route decides from it rather than
+	// provoking the store's sentinel.
+	if s.store.CheckpointStatus(module, cards, s.now()).Available() {
+		if err := s.store.StartCheckpoint(module, cards, s.now()); err != nil {
+			http.Error(w, "could not start the checkpoint: "+err.Error(), http.StatusInternalServerError)
+			return
+		}
+	}
+
+	s.render(w, "checkpoint.html", s.checkpointView(module, cards))
+}
+
+func (s *Server) handleCheckpointReveal(w http.ResponseWriter, r *http.Request) {
+	module, cards, ok := s.checkpointCards(w, r)
+	if !ok {
+		return
+	}
+
+	id := r.PathValue("id")
+
+	for _, c := range cards {
+		if c.ID != id {
+			continue
+		}
+
+		v := s.checkpointView(module, cards)
+		v.HasCard = true
+		v.Card = c
+		v.Q, v.A, v.ECS = s.markdown(c.Q), s.markdown(c.A), s.markdown(c.ECS)
+
+		s.renderFragment(w, "checkpoint-back", v)
+
+		return
+	}
+
+	http.Error(w, "unknown checkpoint card: "+id, http.StatusNotFound)
+}
+
+func (s *Server) handleCheckpointGrade(w http.ResponseWriter, r *http.Request) {
+	module, cards, ok := s.checkpointCards(w, r)
+	if !ok {
+		return
+	}
+
+	id := r.PathValue("id")
+
+	if !slices.ContainsFunc(cards, func(c deck.Card) bool { return c.ID == id }) {
+		http.Error(w, "unknown checkpoint card: "+id, http.StatusNotFound)
+		return
+	}
+
+	g, err := strconv.Atoi(r.URL.Query().Get("g"))
+	if err != nil || g < int(review.Again) || g > int(review.Easy) {
+		http.Error(w, "grade must be 1 (again), 2 (hard), 3 (good) or 4 (easy)", http.StatusBadRequest)
+		return
+	}
+
+	switch err := s.store.GradeCheckpoint(module, id, review.Grade(g), cards, s.now()); {
+	case errors.Is(err, review.ErrCheckpointUnavailable):
+		// No attempt is open — a stale tab, or a hand-crafted request against a
+		// locked or already-passed checkpoint.
+		http.Error(w, "no checkpoint attempt is open for "+module, http.StatusConflict)
+
+		return
+	case err != nil:
+		http.Error(w, "could not record the answer: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	v := s.checkpointView(module, cards)
+	if v.HasCard {
+		s.renderFragment(w, "checkpoint-front", v)
+		return
+	}
+
+	s.renderFragment(w, "checkpoint-result", v)
 }
 
 func (s *Server) handleBrowse(w http.ResponseWriter, r *http.Request) {

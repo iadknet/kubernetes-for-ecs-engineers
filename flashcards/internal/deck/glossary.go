@@ -85,6 +85,13 @@ func (l *Library) validateRequires() error {
 // depends on reachable from that same drill. Without it, `?module=M0` selects
 // no glossary cards — terms carry no module, because a term like RBAC spans
 // several — and every M0 card would stay locked forever.
+//
+// Checkpoint cards take no part in this. They are never added — a module drill
+// must not pull the exam into the study queue — and they are never walked
+// through, because a checkpoint's edges span its whole module and would turn any
+// scope containing it into a full-module drill. The input is still returned
+// untouched: filtering it would break the append-only contract, and the review
+// layer is what withholds an unpassed checkpoint from the queue.
 func (l *Library) WithPrerequisites(cards []Card) []Card {
 	if len(cards) == 0 {
 		return cards
@@ -110,6 +117,10 @@ func (l *Library) WithPrerequisites(cards []Card) []Card {
 		visited[id] = true
 
 		c := l.byID[id]
+		if c.Checkpoint != "" {
+			return
+		}
+
 		for _, dep := range c.Requires {
 			walk(dep)
 		}

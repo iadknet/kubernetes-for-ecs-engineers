@@ -92,14 +92,14 @@ kubernetes_training/
 │   └── 00-setup/             # each module gets a directory as we reach it
 │       └── README.md
 └── flashcards/               # spaced-repetition drill + the program's example workload
-    ├── decks/                # 327 cards, ECS-anchored: a glossary tier plus one deck per module
+    ├── decks/                # 329 cards, ECS-anchored: a glossary tier plus one deck per module
     └── ...                   # small Go + htmx service, containerized
 ```
 
 ## Drilling the vocabulary
 
 Concepts, vocabulary, and acronyms live in **[flashcards/](flashcards/)** —
-327 cards scheduled with FSRS spaced repetition, every one anchored to its
+329 cards scheduled with FSRS spaced repetition, every one anchored to its
 ECS/Fargate equivalent or explicitly flagged as having none.
 
 `decks/00-glossary.yaml` is a **glossary tier**: 72 cards, one term apiece,
@@ -109,6 +109,11 @@ vocabulary arrives before the concepts that use it, not after. A filtered drill
 pulls in the terms it needs, so `/drill?module=M0` teaches M0's vocabulary as
 part of M0. Cram mode (`?cram=1`) ignores all of this on purpose.
 
+A card marked `checkpoint: M0` is a **checkpoint card** — a synthesis question
+that examines the whole module rather than teaching one thing. It gets a
+`requires:` edge to every card in that module automatically, and it stays out
+of the ordinary drill queue until its module's checkpoint is passed.
+
 ```bash
 cd flashcards && make run     # http://localhost:8080
 ```
@@ -116,6 +121,21 @@ cd flashcards && make run     # http://localhost:8080
 Drill by module (`/drill?module=M3`) to stay inside what you've covered. The
 dashboard's **locked** count is cards waiting on vocabulary you haven't
 retained yet — it shrinks as the glossary lands.
+
+### Checkpoints
+
+`/checkpoint?module=M0` is the module's **knowledge bar**: a short set of
+synthesis questions that need several cards combined, not any single one
+recalled. It only opens once every card in the module is retained, and it
+passes only on a clean sweep — every card *Good* or *Easy* in one sitting. Any
+*Again* or *Hard* fails the attempt (the remaining cards are still shown, as a
+diagnostic) and the retake opens the next day. Passed checkpoint cards join the
+normal drill rotation; unpassed ones stay out of it entirely.
+
+Passing a module's checkpoint is the knowledge half of that module being done.
+The practical half stays with the module's **Done when** bar in
+[docs/curriculum.md](docs/curriculum.md); the dashboard shows each checkpoint's
+state but never flips a roadmap marker for you.
 
 ## How work starts
 

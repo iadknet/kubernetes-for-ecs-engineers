@@ -1,0 +1,69 @@
+{{define "checkpoint-front"}}
+<div id="checkpoint" class="card">
+  <div class="meta">{{.Status.Module}} checkpoint · question {{add .Answered 1}} of {{.Total}}</div>
+  <div class="q">{{.Q}}</div>
+  <div class="grades">
+    <button data-key="reveal" hx-post="{{.URL "reveal"}}" hx-target="#checkpoint" hx-swap="outerHTML">
+      Show answer <b>space</b>
+    </button>
+  </div>
+</div>
+{{end}}
+
+
+{{define "checkpoint-back"}}
+<div id="checkpoint" class="card">
+  <div class="meta">{{.Status.Module}} checkpoint · question {{add .Answered 1}} of {{.Total}}</div>
+  <div class="q">{{.Q}}</div>
+  <div class="a">{{.A}}</div>
+  {{with .ECS}}
+  <div class="ecs">
+    <h4>Coming from ECS</h4>
+    {{.}}
+  </div>
+  {{end}}
+  <div class="grades">
+    <button class="g1" data-key="1" hx-post="{{.GradeURL 1}}" hx-target="#checkpoint" hx-swap="outerHTML">Again <b>1</b></button>
+    <button class="g2" data-key="2" hx-post="{{.GradeURL 2}}" hx-target="#checkpoint" hx-swap="outerHTML">Hard <b>2</b></button>
+    <button class="g3" data-key="3" hx-post="{{.GradeURL 3}}" hx-target="#checkpoint" hx-swap="outerHTML">Good <b>3</b></button>
+    <button class="g4" data-key="4" hx-post="{{.GradeURL 4}}" hx-target="#checkpoint" hx-swap="outerHTML">Easy <b>4</b></button>
+  </div>
+</div>
+{{end}}
+
+
+{{define "checkpoint-result"}}
+<div id="checkpoint" class="card">
+  <div class="meta">{{.Status.Module}} checkpoint</div>
+  {{template "checkpoint-status" .Status}}
+</div>
+{{end}}
+
+
+{{/* checkpoint-status renders one review.CheckpointStatus, on the checkpoint
+     page and in the dashboard's status list. */}}
+{{define "checkpoint-status"}}
+{{if eq .State.String "locked"}}
+  <p><strong>{{.Module}} checkpoint: locked.</strong></p>
+  <p class="muted small">{{.Unmastered}} card{{if ne .Unmastered 1}}s{{end}} in
+    {{.Module}} {{if eq .Unmastered 1}}is{{else}}are{{end}} not retained yet.
+    <a href="/drill?module={{.Module}}">Drill {{.Module}}</a> until the locked
+    count reaches zero — a checkpoint failure should mean a transfer gap, not an
+    exposure gap.</p>
+{{else if eq .State.String "ready"}}
+  <p><strong>{{.Module}} checkpoint: ready.</strong></p>
+  <p class="muted small"><a href="/checkpoint?module={{.Module}}">Sit it now</a> —
+    every card Good or Easy in one sitting passes.</p>
+{{else if eq .State.String "failed"}}
+  <p><strong>{{.Module}} checkpoint: Failed on {{.Day}}.</strong></p>
+  <p class="muted small">The retake opens on {{.RetryOn}}. Until then,
+    <a href="/drill?module={{.Module}}">drill {{.Module}}</a> — a same-day retake
+    would only test memory of the answer you just read.</p>
+{{else if eq .State.String "passed"}}
+  <p><strong>{{.Module}} checkpoint: Passed on {{.Day}}.</strong></p>
+  <p class="muted small">Its cards are in normal rotation now, so the synthesis
+    keeps being retained.</p>
+{{else}}
+  <p class="muted small">{{.Module}} has no checkpoint yet.</p>
+{{end}}
+{{end}}

@@ -1,0 +1,20 @@
+{{template "head" "Checkpoint"}}
+
+<p class="muted small">Checkpoint: <strong>{{.Status.Module}}</strong> ·
+  <a href="/">dashboard</a> · <a href="/drill?module={{.Status.Module}}">drill {{.Status.Module}}</a></p>
+
+{{if .HasCard}}
+  {{template "checkpoint-front" .}}
+{{else}}
+  {{template "checkpoint-result" .}}
+{{end}}
+
+<p class="muted small" style="margin-top:2rem">
+  A checkpoint passes only on a clean sweep — every card <em>Good</em> or
+  <em>Easy</em> in one sitting. Any <em>Again</em> or <em>Hard</em> fails the
+  attempt; the rest of the cards are still shown, and the retake opens the next
+  day. Passing is the knowledge half of the module's "done"; the practical half
+  stays with the module's Done-when criteria.
+</p>
+
+{{template "foot"}}

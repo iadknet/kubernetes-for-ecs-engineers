@@ -20,6 +20,12 @@ const (
 	unrelated = "unrelated"
 )
 
+// Card ids in the checkpoint fixtures, shared with deck_test.go.
+const (
+	moduleCard     = "m0-one"
+	checkpointCard = "m0-checkpoint"
+)
+
 // prereqLib is a small dependency graph:
 //
 //	concept -> term-a -> term-base
@@ -157,6 +163,84 @@ func TestWithPrerequisitesKeepsInputOrder(t *testing.T) {
 
 	if strings.Join(got, ",") != strings.Join(want, ",") {
 		t.Errorf("got %v, want %v", got, want)
+	}
+}
+
+// A module drill must never pull the module's exam into the study queue, and an
+// exam must never drag the whole module into an unrelated scope. Checkpoint
+// cards are therefore neither expansion targets nor expansion sources.
+func TestWithPrerequisitesIgnoresCheckpointCards(t *testing.T) {
+	t.Parallel()
+
+	const body = `
+deck: Checkpointed
+module: M0
+cards:
+  - id: term-base
+    term: Base
+    q: q
+    a: a
+  - id: m0-one
+    q: q
+    a: a
+    requires: [term-base]
+  - id: m0-checkpoint
+    checkpoint: M0
+    q: q
+    a: a
+`
+
+	lib, err := deck.Load(fstest.MapFS{"decks/c.yaml": {Data: []byte(body)}}, "decks")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	pick := func(want ...string) []deck.Card {
+		var out []deck.Card
+
+		for _, id := range want {
+			c, ok := lib.Get(id)
+			if !ok {
+				t.Fatalf("no such card %q", id)
+			}
+
+			out = append(out, c)
+		}
+
+		return out
+	}
+
+	tests := []struct {
+		name string
+		in   []string
+		want []string
+	}{
+		{
+			name: "a checkpoint card is not added as a prerequisite",
+			in:   []string{moduleCard},
+			want: []string{"term-base", moduleCard},
+		},
+		{
+			name: "a checkpoint card in the input pulls in nothing",
+			in:   []string{checkpointCard},
+			want: []string{checkpointCard},
+		},
+		{
+			name: "a scope containing the exam still expands its ordinary cards",
+			in:   []string{moduleCard, checkpointCard},
+			want: []string{"term-base", moduleCard, checkpointCard},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			got := ids(lib.WithPrerequisites(pick(tt.in...)))
+			if strings.Join(got, ",") != strings.Join(tt.want, ",") {
+				t.Errorf("WithPrerequisites(%v) = %v, want %v", tt.in, got, tt.want)
+			}
+		})
 	}
 }
 
