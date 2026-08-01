@@ -37,6 +37,15 @@ All non-trivial work starts as a written spec, not as code.
 If the work reveals the spec is wrong, update the spec first, then implement.
 The code and the spec must not disagree silently.
 
+## Agent Skills
+
+- `.agents/skills/` is the authoritative source for repository-local Agent
+  Skills. Keep shared skill content and resources coding-agent agnostic.
+- `.claude/skills/<name>` entries are compatibility symlinks to the canonical
+  directories. Edit `.agents/skills/<name>` rather than the symlinked path.
+- Add a compatibility link when adding a canonical skill so Claude Code and
+  agents that support `.agents/skills/` discover the same package.
+
 ## Project Direction
 
 - **ECS is the teaching anchor.** The `k8s-for-ecs-engineers` skill holds the
