@@ -44,8 +44,8 @@ cover: ## Run tests with a coverage summary
 	go test -race -cover ./...
 
 .PHONY: lint-decks
-lint-decks: ## Check every card requires the glossary terms it uses (also run by `test`)
-	go test -run 'TestGlossary' ./internal/deck/
+lint-decks: ## Check every card requires the glossary terms it uses, and that diagrams stay inside that gate (also run by `test`)
+	go test -run 'TestGlossary|TestDiagram' ./internal/deck/
 
 .PHONY: fmt
 fmt: ## Rewrite files with gofmt + gofumpt

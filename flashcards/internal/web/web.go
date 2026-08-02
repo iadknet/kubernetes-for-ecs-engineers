@@ -18,6 +18,7 @@ import (
 
 	"github.com/yuin/goldmark"
 	"github.com/yuin/goldmark/extension"
+	"go.abhg.dev/goldmark/mermaid"
 
 	"github.com/iadk/k8s-flashcards/internal/chat"
 	"github.com/iadk/k8s-flashcards/internal/deck"
@@ -60,7 +61,7 @@ func New(lib *deck.Library, store *review.Store, cfg Config) (*Server, error) {
 		lib:   lib,
 		store: store,
 		tmpl:  tmpl,
-		md:    goldmark.New(goldmark.WithExtensions(extension.GFM)),
+		md:    goldmark.New(goldmark.WithExtensions(extension.GFM, mermaidExtender())),
 		now:   time.Now,
 		chat:  cfg.Chat,
 	}, nil
@@ -279,6 +280,30 @@ func (s *Server) scope(f filter) (cards []deck.Card, terms int) {
 	expanded := s.lib.WithPrerequisites(selected)
 
 	return expanded, len(expanded) - len(selected)
+}
+
+// mermaidExtender renders ```mermaid blocks as <pre class="mermaid"> for the
+// MermaidJS runtime in layout.html to draw.
+//
+// Every field set here is load-bearing, and the defaults are all wrong for this
+// app — do not simplify this to &mermaid.Extender{}:
+//
+//   - RenderMode defaults to RenderModeAuto, which switches to server-side
+//     rendering whenever `mmdc` happens to be on $PATH. A developer with
+//     mermaid-cli installed would silently get different output, produced by
+//     shelling out to Node.
+//   - NoScript suppresses the extension's own <script> pair. markdown() runs
+//     once per card *field*, so without it a card with a diagram re-injects a
+//     CDN script tag and a startOnLoad initialize call into every htmx
+//     fragment. layout.html carries the one copy of each instead.
+//
+// Theme is deliberately unset: the extender documents it as ignored in client
+// mode, so layout.html picks the theme at page load.
+func mermaidExtender() *mermaid.Extender {
+	return &mermaid.Extender{
+		RenderMode: mermaid.RenderModeClient,
+		NoScript:   true,
+	}
 }
 
 func (s *Server) markdown(src string) template.HTML {

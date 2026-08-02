@@ -1,6 +1,6 @@
 # Card Diagrams — Technical Spec
 
-**Status**: ⏳ PLANNED
+**Status**: ✅ COMPLETE
 **Last updated**: 2026-08-01
 
 ---
@@ -220,49 +220,49 @@ signal during review.
 
 ## Implementation Phases
 
-### Phase 1: Rendering, lints, one card — ⏳ PLANNED
+### Phase 1: Rendering, lints, one card — ✅ COMPLETE
 
 **Objective**: Wire the renderer, encode the convention as executable checks,
 and prove both on one real card before authoring a batch.
 
 **Tasks**:
 
-- [ ] Widen `lint-decks` in `flashcards/Makefile:48` to
+- [x] Widen `lint-decks` in `flashcards/Makefile:48` to
       `-run 'TestGlossary|TestDiagram'`, so the lints below run there and keep
       names that describe what they check
-- [ ] Add failing `TestDiagramTermsAreScanned`: a synthetic fixture card whose
+- [x] Add failing `TestDiagramTermsAreScanned`: a synthetic fixture card whose
       only use of a glossary term is inside a `mermaid` block, asserting
       `usesUnrequiredTerms` returns that term. This is the permanent guard that
       diagrams sit inside the vocabulary gate — both files are `package
       deck_test` (`internal/deck/glossary_test.go:1`), so the helper is
       directly callable
-- [ ] Add failing `TestDiagramStyle`: for `mermaid`-tagged blocks only, no
+- [x] Add failing `TestDiagramStyle`: for `mermaid`-tagged blocks only, no
       arrow operator adjacent to `[0-9A-Za-z_]`, no `_` adjacent to
       `[0-9A-Za-z]`, and the first directive line is `flowchart`. Include a
       table case asserting `API[kube-apiserver]` **passes** — the over-broad
       "no hyphen near a word character" reading is the trap
-- [ ] Add failing `TestMarkdownMermaidHasNoCDN` in `internal/web`: driving the
+- [x] Add failing `TestMarkdownMermaidHasNoCDN` in `internal/web`: driving the
       reveal handler over a fixture card containing a `mermaid` block yields no
       external host reference
-- [ ] Vendor `mermaid.min.js` 11.16.0 into `internal/web/static/`, recording
+- [x] Vendor `mermaid.min.js` 11.16.0 into `internal/web/static/`, recording
       version, URL, and size in **Vendored MermaidJS**, and wire
       `mermaid.Extender` in `internal/web/web.go` with
       `RenderMode: RenderModeClient` and `NoScript: true`
-- [ ] Add to `layout.html`: the `<script src="/static/mermaid.min.js">`, one
+- [x] Add to `layout.html`: the `<script src="/static/mermaid.min.js">`, one
       `mermaid.initialize` picking `dark`/`neutral` from `matchMedia`, and an
       `htmx:afterSwap` listener calling `mermaid.run()`
-- [ ] Add a `pre.mermaid` CSS rule so diagrams are not framed as grey code
+- [x] Add a `pre.mermaid` CSS rule so diagrams are not framed as grey code
       blocks by the existing bare-`pre` styling
-- [ ] Add the diagram to `m0-kubelet-is-the-thing-that-acts` until both deck
+- [x] Add the diagram to `m0-kubelet-is-the-thing-that-acts` until both deck
       lints pass, adding any `requires:` edges the new labels pull in
-- [ ] Verify in the browser: diagram renders on the reveal swap (not just hard
+- [x] Verify in the browser: diagram renders on the reveal swap (not just hard
       refresh) — `make run`. Check each theme by setting the OS theme and
       loading the page, per the page-load contract in **Rendering Integration**
-- [ ] Confirm the existing untagged kubectl/YAML blocks are unflagged by the
+- [x] Confirm the existing untagged kubectl/YAML blocks are unflagged by the
       style lint
-- [ ] Write `flashcards/decks/README.md` with the rules as authoring guidance,
+- [x] Write `flashcards/decks/README.md` with the rules as authoring guidance,
       citing the lint that enforces each. `AGENTS.md` is not edited
-- [ ] Sync affected documentation with the implemented changes
+- [x] Sync affected documentation with the implemented changes
 
 **Deliverables**:
 
@@ -274,7 +274,7 @@ and prove both on one real card before authoring a batch.
 - One diagram on `01-foundations.yaml`, passing both deck lints
 - `flashcards/decks/README.md` — authoritative authoring rules
 
-### Phase 2: M0 diagram batch — ⏳ PLANNED
+### Phase 2: M0 diagram batch — ✅ COMPLETE
 
 **Objective**: Apply the convention to the M0 cards whose answer is a flow, and
 find out where it breaks down.
@@ -313,12 +313,12 @@ in Phase 1):
 
 **Tasks**:
 
-- [ ] Author a diagram for each of the six cards above, adding `requires:` edges
+- [x] Author a diagram for each of the six cards above, adding `requires:` edges
       as the labels demand
-- [ ] Review the batch in both themes at desktop and the 64rem single-column
+- [x] Review the batch in both themes at desktop and the 64rem single-column
       breakpoint; fix anything that overflows or reads worse than the prose
       alone
-- [ ] Sync affected documentation with the implemented changes
+- [x] Sync affected documentation with the implemented changes
 
 **Deliverables**:
 
@@ -420,35 +420,55 @@ in Phase 1):
   producing `<pre class="mermaid">`. Leave it at the default; the
   `pre.mermaid` CSS rule is written against it.
 
-Remaining patterns and gotchas are filled in as the diagrams are authored.
+### Where the convention did not suit the card
+
+All seven cards earned their diagram; none was dropped. One shape did not
+survive contact:
+
+- **`flowchart LR` past three nodes.** `m0-label-selector`,
+  `m0-kube-proxy-has-no-health-checks` and `m0-kind-image-loading` are
+  four-node chains, and at that width MermaidJS scales the whole diagram down
+  to fit the 48rem card column rather than wrapping or overflowing. Nothing
+  looks broken — the labels are simply too small to read, which is exactly the
+  failure a lint cannot catch and a hard-refresh eyeball test almost misses.
+  All three moved to `flowchart TD`. The direction guidance lives in
+  `flashcards/decks/README.md`; it is authoring advice, not a rule, because
+  "too small to read" is not mechanically checkable.
+
+Diagram labels stayed inside each card's existing `requires:` set, so no
+diagram pulled in a new edge. That was deliberate rather than lucky: a term
+introduced first in a diagram would move the card later in the unlock graph to
+teach vocabulary the prose never uses. Where a label wanted a gated term the
+answer avoided — `status` on `m0-kubelet-is-the-thing-that-acts` — the label
+was reworded ("reports back what is running"), not the edge list.
 
 ---
 
 ## Success Criteria
 
-- [ ] `make check` passes
-- [ ] `make lint-decks` runs both new deck tests:
+- [x] `make check` passes
+- [x] `make lint-decks` runs both new deck tests:
       `go test -run 'TestGlossary|TestDiagram' -v ./internal/deck/ |
       grep -cE '^=== RUN +TestDiagram[A-Za-z]*$'` returns 2. The `$` anchor
       matters — without it the subtest `=== RUN` lines from `TestDiagramStyle`'s
       table are counted too and the number can never be 2
-- [ ] `TestDiagramTermsAreScanned` fails if `usesUnrequiredTerms` is changed to
+- [x] `TestDiagramTermsAreScanned` fails if `usesUnrequiredTerms` is changed to
       ignore fenced blocks
-- [ ] `TestDiagramStyle` accepts `API[kube-apiserver]` and rejects
+- [x] `TestDiagramStyle` accepts `API[kube-apiserver]` and rejects
       `kubelet-->CRI`
-- [ ] The `m0-kubelet-is-the-thing-that-acts` diagram renders on the reveal
+- [x] The `m0-kubelet-is-the-thing-that-acts` diagram renders on the reveal
       swap, observed in the browser via `make run`, and reads correctly when the
       page is loaded under each OS theme
-- [ ] Every `mermaid` block in every deck passes the arrow, underscore, and
+- [x] Every `mermaid` block in every deck passes the arrow, underscore, and
       `flowchart` rules; the existing untagged kubectl/YAML blocks are untouched
       and unflagged
-- [ ] `TestMarkdownMermaidHasNoCDN` passes, and the served page fetches
+- [x] `TestMarkdownMermaidHasNoCDN` passes, and the served page fetches
       MermaidJS only from `/static/` — no `cdn.jsdelivr.net` request in the
       browser network panel
-- [ ] Each of the six Phase 2 cards carries a diagram, and no card on the
+- [x] Each of the six Phase 2 cards carries a diagram, and no card on the
       leave-as-prose list gained one
-- [ ] Each diagrammed card still reads correctly with the diagram deleted
-- [ ] `flashcards/decks/README.md` states every rule the lints enforce, and
+- [x] Each diagrammed card still reads correctly with the diagram deleted
+- [x] `flashcards/decks/README.md` states every rule the lints enforce, and
       `AGENTS.md` is unchanged by this spec
 
 ---

@@ -44,6 +44,15 @@ cards:
 
       This is why RBAC on the API server is a real security boundary, and why
       "talk to the Kubernetes API" always means "talk to kube-apiserver".
+
+      ```mermaid
+      flowchart LR
+        S[kube-scheduler] --> API[API server]
+        C[controllers] --> API
+        K[kubelet] --> API
+        Y[your own code] --> API
+        API --> E[(etcd)]
+      ```
     requires:
       [
         term-api-server,
@@ -68,6 +77,13 @@ cards:
       Nothing pushes work to it. It pulls, which is why a machine whose agent
       is wedged looks healthy from the outside right up until you check what is
       actually running on it.
+
+      ```mermaid
+      flowchart LR
+        K[kubelet] -->|watches for its assignments| API[API server]
+        K -->|starts the work over CRI| R[container runtime]
+        K -->|reports back what is running| API
+      ```
     requires:
       [term-kubelet, term-api-server, term-container, term-cri, term-node]
     ecs: |
@@ -86,6 +102,13 @@ cards:
 
       To actually remove it you change what was asked for — scale to zero, or
       delete the owner.
+
+      ```mermaid
+      flowchart TD
+        D[desired state] --> C[controller]
+        C -->|acts on the difference| A[actual state]
+        A -->|observed| C
+      ```
     requires:
       [
         term-reconciliation,
@@ -216,6 +239,13 @@ cards:
 
       Typo the selector and you get a Service with zero endpoints, no error,
       and connection timeouts.
+
+      ```mermaid
+      flowchart TD
+        S[Service] -->|selector| L[matching labels]
+        L --> P[any Pod in the same Namespace]
+        P -->|passing its readiness probe| E[endpoint]
+      ```
     requires:
       [
         term-service,
@@ -312,6 +342,13 @@ cards:
       membership.
 
       There is no proxy process in the data path, and nothing to tune.
+
+      ```mermaid
+      flowchart TD
+        R[readiness probe] -->|decides membership| E[endpoint set]
+        E --> KP[kube-proxy]
+        KP -->|programs| K[kernel rules]
+      ```
     requires:
       [
         term-kube-proxy,
@@ -337,6 +374,17 @@ cards:
       It is a requirement, not a feature of any one plugin — which is why
       workloads move between clusters running Calico, Cilium, or the AWS VPC
       CNI without changing.
+
+      ```mermaid
+      flowchart LR
+        subgraph N1[one node]
+          P1[Pod]
+        end
+        subgraph N2[another node]
+          P2[Pod]
+        end
+        P1 -->|its own IP, no NAT| P2
+      ```
     requires: [term-cni, term-pod, term-node, term-kubernetes, term-cluster]
     ecs: |
       `awsvpc` mode giving each task an ENI and a VPC IP. On EKS it is
@@ -372,6 +420,13 @@ cards:
       machines first:
 
           kind load docker-image k8s-flashcards:dev --name k8s-training
+
+      ```mermaid
+      flowchart TD
+        B[docker build] --> D[your local image cache]
+        D -.->|never reaches it| S[the image store on each node]
+        B -->|kind load docker-image| S
+      ```
     requires: [term-kind-tool, term-container, term-node, term-pod]
     tags: [kind, tooling, acronym]
 

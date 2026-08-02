@@ -36,6 +36,9 @@
   pre { background: var(--code-bg); padding: .75rem 1rem; border-radius: 6px;
         overflow-x: auto; line-height: 1.5; }
   pre code { background: none; padding: 0; }
+  /* A diagram is a picture, not a code listing: undo the bare-`pre` code-block
+     framing above, but keep it scrollable on a narrow viewport. */
+  pre.mermaid { background: none; padding: .5rem 0; text-align: center; }
 
   .card { background: var(--card); border: 1px solid var(--line); border-radius: 10px;
           padding: 1.5rem; margin-bottom: 1rem; }
@@ -106,6 +109,29 @@
 
 {{define "foot"}}
 </div>
+<script src="/static/mermaid.min.js"></script>
+<script>
+  // MermaidJS is vendored under /static/, so nothing here touches the network.
+  // The goldmark extension is configured NoScript, which means this is the one
+  // place the runtime is loaded, initialized, and re-run.
+  //
+  // The theme is sampled once, at load. mermaid.run() consumes the node it
+  // renders, so re-theming a drawn diagram would mean re-injecting its source;
+  // an OS theme change mid-session therefore restyles the page but leaves
+  // diagrams as they were until reload. Fine for a local single-user tool.
+  mermaid.initialize({
+    startOnLoad: true,
+    theme: window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'neutral',
+  });
+
+  // Cards arrive by htmx swap — revealing an answer is a swap — and swapped-in
+  // markup has never been through startOnLoad. Without this, a diagram renders
+  // on a hard refresh and shows as raw Mermaid source during an actual drill.
+  document.body.addEventListener('htmx:afterSwap', function () {
+    var nodes = document.querySelectorAll('pre.mermaid:not([data-processed])');
+    if (nodes.length) { mermaid.run({ nodes: nodes }); }
+  });
+</script>
 <script>
   // Keyboard drilling: space/enter reveals, 1-4 grades.
   document.addEventListener('keydown', function (e) {

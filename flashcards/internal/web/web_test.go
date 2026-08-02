@@ -311,6 +311,57 @@ func TestStaticAssetIsServedLocally(t *testing.T) {
 	}
 }
 
+// fence is the markdown code fence, as a constant because a Go raw string
+// literal cannot contain a backtick.
+const fence = "```"
+
+const diagramDeck = `
+deck: Diagram deck
+module: M1
+cards:
+  - id: card-with-diagram
+    q: |
+      What acts on an assignment?
+    a: |
+      The node agent does.
+
+      ` + fence + `mermaid
+      flowchart LR
+        A[control plane] --> K[node agent]
+      ` + fence + `
+`
+
+// The extension's default MermaidURL is a jsdelivr CDN link, and markdown()
+// runs per card field, so the failure mode of losing NoScript or RenderMode is
+// a script tag pointing at the internet — silent on any machine that has it.
+// This holds the no-network requirement to a test rather than an observation
+// made once at wiring time.
+func TestMarkdownMermaidHasNoCDN(t *testing.T) {
+	t.Parallel()
+
+	h, _, _ := serverOver(t, map[string]string{"diagram.yaml": diagramDeck})
+
+	rec := do(t, h, "POST", "/drill/card-with-diagram/reveal")
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, body: %s", rec.Code, rec.Body)
+	}
+
+	body := rec.Body.String()
+	// Without this the test passes vacuously the day the extension stops being
+	// wired up at all.
+	if !strings.Contains(body, `<pre class="mermaid">`) {
+		t.Fatalf("the reveal rendered no mermaid container, so nothing here is being checked:\n%s", body)
+	}
+
+	if url := regexp.MustCompile(`https?://[^\s"'<]+`).FindString(body); url != "" {
+		t.Errorf("the fragment references %q; MermaidJS is vendored under /static/", url)
+	}
+
+	if strings.Contains(body, "<script") {
+		t.Errorf("the fragment carries its own script tag; layout.html holds the one copy:\n%s", body)
+	}
+}
+
 // The real decks must render through the real templates, not just the fixture.
 func TestRealDecksRenderEndToEnd(t *testing.T) {
 	t.Parallel()
