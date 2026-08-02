@@ -1,5 +1,5 @@
 {{define "card-front"}}
-<div id="card" class="card">
+<div id="card" class="card" data-card="{{.Card.ID}}">
   <div class="meta">{{with .Card.Module}}{{.}} · {{end}}{{.Card.Deck}}</div>
   <div class="q">{{.Q}}</div>
   {{if .IsMultipleChoice}}
@@ -24,7 +24,7 @@
 
 
 {{define "card-picked"}}
-<div id="card" class="card">
+<div id="card" class="card" data-card="{{.Card.ID}}">
   <div class="meta">{{with .Card.Module}}{{.}} · {{end}}{{.Card.Deck}}</div>
   <div class="q">{{.Q}}</div>
   <p class="verdict {{if .WasCorrect}}right{{else}}wrong{{end}}">
@@ -55,7 +55,7 @@
 
 
 {{define "card-back"}}
-<div id="card" class="card">
+<div id="card" class="card" data-card="{{.Card.ID}}">
   <div class="meta">{{with .Card.Module}}{{.}} · {{end}}{{.Card.Deck}}</div>
   <div class="q">{{.Q}}</div>
   <div class="a">{{.A}}</div>

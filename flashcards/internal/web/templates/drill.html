@@ -5,10 +5,86 @@
   <a href="/">change</a>{{if not .Filter.Cram}} ·
   <a href="/drill?cram=1">cram mode</a>{{end}}</p>
 
+{{/* The wrapper is always present but unstyled unless chat is on, so a build
+     with chat off renders exactly as it did before it existed. */}}
+<div class="drill-layout">
+<div class="drill-card">
 {{if .HasCard}}
   {{template "card-front" .Card}}
 {{else}}
   {{template "card-done" .}}
 {{end}}
+</div>
+
+{{with .Chat}}{{$panel := .}}
+<style>
+  /* Scoped to the panel rather than added to the shared stylesheet, so a build
+     with chat off ships no trace of it — not even dead CSS. */
+
+  /* Two columns, and a wider page to hold them: the card keeps the reading
+     width it had, and the panel sits beside it instead of pushing the grading
+     buttons below the fold. */
+  .wrap { max-width: 76rem; }
+  .drill-layout { display: grid; grid-template-columns: minmax(0, 1.6fr) minmax(0, 1fr);
+                  gap: 1.75rem; align-items: start; }
+
+  /* Sticky and self-scrolling, so a long conversation never drags the card out
+     of view — the card is what the drill is about. */
+  #chat { border: 1px solid var(--line); border-radius: 10px; background: var(--card);
+          padding: 1rem 1.25rem 1.25rem; display: flex; flex-direction: column;
+          position: sticky; top: 1.5rem; max-height: calc(100vh - 3rem); }
+  .chat-bar { display: flex; align-items: center; gap: .5rem; flex-wrap: wrap; margin-bottom: .75rem; }
+  .chat-title { font-size: .75rem; text-transform: uppercase; letter-spacing: .06em;
+                color: var(--muted); margin-right: auto; }
+  .chat-bar select, .chat-bar button { font: inherit; font-size: .8125rem; padding: .3rem .5rem;
+    border: 1px solid var(--line); border-radius: 6px; background: var(--bg); color: var(--fg); }
+  .chat-log { display: flex; flex-direction: column; gap: .85rem;
+              flex: 1; min-height: 0; overflow-y: auto; }
+  .chat-log:empty { display: none; }
+  .chat-msg { white-space: pre-wrap; font-size: .9375rem; }
+  .chat-msg.you { color: var(--muted); border-left: 3px solid var(--line); padding-left: .75rem; }
+  .chat-msg.note { color: var(--muted); font-size: .8125rem; }
+  .chat-msg.err { color: var(--again); }
+  .chat-form { display: flex; gap: .5rem; margin-top: .85rem; }
+  .chat-form textarea { flex: 1; font: inherit; font-size: .9375rem; resize: vertical;
+    padding: .5rem .65rem; border: 1px solid var(--line); border-radius: 6px;
+    background: var(--bg); color: var(--fg); }
+
+  /* Too narrow for two columns: fall back to the card with the panel beneath
+     it, which is where it started. */
+  @media (max-width: 64rem) {
+    .wrap { max-width: 48rem; }
+    .drill-layout { grid-template-columns: minmax(0, 1fr); }
+    #chat { position: static; max-height: none; margin-top: 1.5rem; }
+    .chat-log { max-height: 26rem; flex: none; }
+  }
+</style>
+<section id="chat">
+  <div class="chat-bar">
+    <strong class="chat-title">Ask about this card</strong>
+    <select id="chat-model" aria-label="Model">
+      {{range $panel.Models}}<option value="{{.}}"{{if eq . $panel.DefaultModel}} selected{{end}}>{{.}}</option>{{end}}
+    </select>
+    {{if $panel.Efforts}}
+    <select id="chat-effort" aria-label="Effort">
+      <option value="">default effort</option>
+      {{range $panel.Efforts}}<option value="{{.}}">{{.}}</option>{{end}}
+    </select>
+    {{end}}
+    <button type="button" id="chat-reset" title="Forget this conversation and start again">new chat</button>
+  </div>
+  <div id="chat-log" class="chat-log" aria-live="polite"></div>
+  <form id="chat-form" class="chat-form">
+    <textarea id="chat-input" rows="2"
+      placeholder="Why would you reach for this instead of an ECS service?"></textarea>
+    <button type="submit" id="chat-send">Ask</button>
+  </form>
+  <p class="muted small">Answered by the Claude Code CLI on this machine, inside this
+    repo. It explains around the card — it will not answer it for you.</p>
+</section>
+{{end}}
+</div>
+
+{{with .Chat}}<script src="/static/chat.js"></script>{{end}}
 
 {{template "foot"}}

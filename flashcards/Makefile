@@ -1,8 +1,9 @@
-IMAGE    ?= k8s-flashcards
-TAG      ?= dev
-CLUSTER  ?= k8s-training
-PORT     ?= 8080
-FUZZTIME ?= 60s
+IMAGE      ?= k8s-flashcards
+TAG        ?= dev
+CLUSTER    ?= k8s-training
+PORT       ?= 8080
+FUZZTIME   ?= 60s
+CHAT_MODEL ?= sonnet
 
 .DEFAULT_GOAL := help
 
@@ -14,6 +15,20 @@ help: ## Show this help
 .PHONY: run
 run: ## Run locally on http://localhost:$(PORT)
 	PORT=$(PORT) go run ./cmd/flashcards
+
+# Deliberately not folded into `run`: `run` matches what the cluster gets, and
+# chat needs a logged-in claude CLI that not every clone of this repo has.
+#
+# It runs from the repo root rather than from here, because the chat subprocess
+# inherits the server's working directory — and only at the root does the CLI
+# pick up AGENTS.md and the k8s-for-ecs-engineers skill. Started from
+# flashcards/ it answers without either, which looks like a worse model rather
+# than a misconfiguration. DATA_DIR is pinned so review state stays in the same
+# place `make run` puts it. Override the model with `make run-chat CHAT_MODEL=opus`.
+.PHONY: run-chat
+run-chat: build ## Run locally with the chat panel (needs a logged-in `claude` CLI)
+	cd .. && PORT=$(PORT) DATA_DIR=$(CURDIR)/data \
+	  CHAT_ENABLED=true CHAT_MODEL=$(CHAT_MODEL) $(CURDIR)/bin/flashcards
 
 # --- Quality gates -----------------------------------------------------------
 # Every gate is its own target so it can be run and debugged on its own. `check`

@@ -91,6 +91,7 @@
   .statline div { font-size: .8125rem; color: var(--muted); }
   .statline b { display: block; font-size: 1.5rem; color: var(--fg); font-weight: 600;
                 font-variant-numeric: tabular-nums; }
+
 </style>
 </head>
 <body><div class="wrap">
@@ -108,7 +109,7 @@
 <script>
   // Keyboard drilling: space/enter reveals, 1-4 grades.
   document.addEventListener('keydown', function (e) {
-    if (e.target.matches('input, textarea')) return;
+    if (e.target.matches('input, textarea, select')) return;
     var key = e.key === ' ' ? 'reveal' : e.key;
     var el = document.querySelector('[data-key="' + key + '"]')
           || (e.key === 'Enter' ? document.querySelector('[data-key="reveal"]') : null);

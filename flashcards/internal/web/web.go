@@ -19,12 +19,22 @@ import (
 	"github.com/yuin/goldmark"
 	"github.com/yuin/goldmark/extension"
 
+	"github.com/iadk/k8s-flashcards/internal/chat"
 	"github.com/iadk/k8s-flashcards/internal/deck"
 	"github.com/iadk/k8s-flashcards/internal/review"
 )
 
 //go:embed templates/*.html static/*
 var assets embed.FS
+
+// Config carries the optional collaborators a server is built with. Its zero
+// value is the shipped configuration: no chat, no extra routes.
+type Config struct {
+	// Chat enables the drill view's chat panel. Nil — the default — leaves the
+	// chat routes unregistered and the panel markup unrendered, so a build with
+	// the feature compiled in is byte-for-byte the build without it.
+	Chat chat.Provider
+}
 
 // Server holds everything the handlers need.
 type Server struct {
@@ -33,10 +43,11 @@ type Server struct {
 	tmpl  *template.Template
 	md    goldmark.Markdown
 	now   func() time.Time
+	chat  chat.Provider
 }
 
 // New builds a server over the given library and review store.
-func New(lib *deck.Library, store *review.Store) (*Server, error) {
+func New(lib *deck.Library, store *review.Store, cfg Config) (*Server, error) {
 	tmpl, err := template.New("").Funcs(template.FuncMap{
 		"until": humanUntil,
 		"add":   func(a, b int) int { return a + b },
@@ -51,6 +62,7 @@ func New(lib *deck.Library, store *review.Store) (*Server, error) {
 		tmpl:  tmpl,
 		md:    goldmark.New(goldmark.WithExtensions(extension.GFM)),
 		now:   time.Now,
+		chat:  cfg.Chat,
 	}, nil
 }
 
@@ -70,6 +82,7 @@ func (s *Server) Routes() *http.ServeMux {
 	mux.HandleFunc("GET /healthz", s.handleHealthz)
 	mux.HandleFunc("GET /readyz", s.handleReadyz)
 	mux.Handle("GET /static/", http.FileServerFS(assets))
+	s.chatRoutes(mux)
 
 	return mux
 }
@@ -352,6 +365,7 @@ func (s *Server) handleDrill(w http.ResponseWriter, r *http.Request) {
 		"Stats":   s.store.Stats(cards, s.now()),
 		"Terms":   terms,
 		"HasCard": ok,
+		"Chat":    s.chatPanel(),
 	}
 	if ok {
 		data["Card"] = s.view(card, f)

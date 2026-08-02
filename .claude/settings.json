@@ -14,7 +14,8 @@
       "Bash(curl -s -X POST \"http://localhost:8080/drill/term-pod/pick?p=term-node&deck=00-glossary\")",
       "Bash(pkill -f 'flashcards')",
       "Bash(docker stop *)",
-      "WebFetch(domain:learn.chatgpt.com)"
-    ]
+      "WebFetch(domain:learn.chatgpt.com)",
+      "Bash(pkill -f 'bin/flashcards')",
+      "Bash(make -C flashcards run-chat PORT=8113)"    ]
   }
 }

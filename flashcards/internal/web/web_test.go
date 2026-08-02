@@ -52,7 +52,7 @@ func newServer(t *testing.T) http.Handler {
 		t.Fatal(err)
 	}
 
-	srv, err := web.New(lib, store)
+	srv, err := web.New(lib, store, web.Config{})
 	if err != nil {
 		t.Fatalf("building server: %v", err)
 	}
@@ -89,7 +89,7 @@ func unwritableServer(t *testing.T) (http.Handler, string) {
 	//nolint:gosec // G302: as above — directory permissions, not file permissions.
 	t.Cleanup(func() { _ = os.Chmod(dir, 0o700) })
 
-	srv, err := web.New(lib, store)
+	srv, err := web.New(lib, store, web.Config{})
 	if err != nil {
 		t.Fatalf("building server: %v", err)
 	}
@@ -325,7 +325,7 @@ func TestRealDecksRenderEndToEnd(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	srv, err := web.New(lib, store)
+	srv, err := web.New(lib, store, web.Config{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -412,7 +412,7 @@ func serverOver(t *testing.T, decks map[string]string) (http.Handler, *deck.Libr
 		t.Fatal(err)
 	}
 
-	srv, err := web.New(lib, store)
+	srv, err := web.New(lib, store, web.Config{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1008,4 +1008,34 @@ func TestCheckpointCardsAreNotDrilledBeforeAPass(t *testing.T) {
 	if strings.Contains(body, "control-plane/worker split") {
 		t.Error("the drill served an unpassed checkpoint card")
 	}
+}
+
+// Off by default has to mean absent, not merely inert: the deployed image ships
+// this build, and a route that exists but is unconfigured is a runtime failure
+// waiting for the first curious request.
+func TestChatSurfaceIsAbsentWithoutAProvider(t *testing.T) {
+	t.Parallel()
+
+	h := newServer(t)
+
+	for _, target := range []string{"/chat", "/chat/reset"} {
+		t.Run(target, func(t *testing.T) {
+			t.Parallel()
+
+			if rec := do(t, h, http.MethodPost, target); rec.Code != http.StatusNotFound {
+				t.Errorf("POST %s = %d, want %d", target, rec.Code, http.StatusNotFound)
+			}
+		})
+	}
+
+	t.Run("drill page carries no panel", func(t *testing.T) {
+		t.Parallel()
+
+		body := do(t, h, http.MethodGet, "/drill").Body.String()
+		for _, marker := range []string{"chat-form", "chat.js", `id="chat"`} {
+			if strings.Contains(body, marker) {
+				t.Errorf("drill page contains chat markup %q", marker)
+			}
+		}
+	})
 }

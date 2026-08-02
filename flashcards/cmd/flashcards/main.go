@@ -3,10 +3,16 @@
 // Configuration is environment-driven so the same binary runs on a laptop and
 // in a Pod without a rebuild:
 //
-//	PORT         listen port (default 8080)
-//	DATA_DIR     where review state is persisted (default ./data)
-//	DECKS_DIR    read decks from disk instead of the embedded copy
-//	NEW_PER_DAY  cap on newly introduced cards per day (default 40)
+//	PORT          listen port (default 8080)
+//	DATA_DIR      where review state is persisted (default ./data)
+//	DECKS_DIR     read decks from disk instead of the embedded copy
+//	NEW_PER_DAY   cap on newly introduced cards per day (default 40)
+//	CHAT_ENABLED  serve the drill view's chat panel (default false)
+//	CHAT_PROVIDER which chat backend to use (default claude-cli)
+//
+// Those are every variable this command knows. A chat provider reads and
+// validates its own configuration — see internal/chat/claudecli for CLAUDE_BIN
+// and CHAT_MODEL — so adding a provider never edits this file's vocabulary.
 package main
 
 import (
@@ -23,6 +29,8 @@ import (
 	"time"
 
 	flashcards "github.com/iadk/k8s-flashcards"
+	"github.com/iadk/k8s-flashcards/internal/chat"
+	"github.com/iadk/k8s-flashcards/internal/chat/claudecli"
 	"github.com/iadk/k8s-flashcards/internal/deck"
 	"github.com/iadk/k8s-flashcards/internal/review"
 	"github.com/iadk/k8s-flashcards/internal/web"
@@ -74,7 +82,20 @@ func run(log *slog.Logger) error {
 		return fmt.Errorf("opening review store: %w", err)
 	}
 
-	srv, err := web.New(lib, store)
+	// Chat is off unless asked for, and a provider that cannot be built is a
+	// boot failure rather than a panel that breaks on its first question.
+	var chatProvider chat.Provider
+
+	if envBool("CHAT_ENABLED", false) {
+		chatProvider, err = newChatProvider(env("CHAT_PROVIDER", "claude-cli"))
+		if err != nil {
+			return fmt.Errorf("chat: %w", err)
+		}
+
+		log.Info("chat enabled", "provider", env("CHAT_PROVIDER", "claude-cli"))
+	}
+
+	srv, err := web.New(lib, store, web.Config{Chat: chatProvider})
 	if err != nil {
 		return err
 	}
@@ -122,6 +143,26 @@ func run(log *slog.Logger) error {
 	return nil
 }
 
+// newChatProvider builds the chat backend named by CHAT_PROVIDER.
+//
+// Each provider reads and validates its own configuration, so this switch never
+// learns provider vocabulary: adding one is a new case, not a new env var read
+// here. An unknown name fails the process rather than silently disabling chat,
+// because a typo that quietly does nothing is the worse failure.
+func newChatProvider(name string) (chat.Provider, error) {
+	switch name {
+	case "claude-cli":
+		p, err := claudecli.New()
+		if err != nil {
+			return nil, err
+		}
+
+		return p, nil
+	default:
+		return nil, fmt.Errorf("unknown CHAT_PROVIDER %q (known: claude-cli)", name)
+	}
+}
+
 func logging(log *slog.Logger, next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		start := time.Now()
@@ -148,9 +189,27 @@ func (r *statusRecorder) WriteHeader(code int) {
 	r.ResponseWriter.WriteHeader(code)
 }
 
+// Unwrap is what http.ResponseController follows to reach the real writer.
+// Without it this wrapper hides Flush and SetWriteDeadline from every handler
+// beneath it, and a streaming response cannot flush a byte.
+func (r *statusRecorder) Unwrap() http.ResponseWriter { return r.ResponseWriter }
+
 func env(key, fallback string) string {
 	if v := os.Getenv(key); v != "" {
 		return v
+	}
+
+	return fallback
+}
+
+// envBool reads a boolean setting, falling back on anything it cannot parse —
+// the same forgiving shape as envInt, so a malformed value never stops the
+// server from booting.
+func envBool(key string, fallback bool) bool {
+	if v := os.Getenv(key); v != "" {
+		if b, err := strconv.ParseBool(v); err == nil {
+			return b
+		}
 	}
 
 	return fallback
