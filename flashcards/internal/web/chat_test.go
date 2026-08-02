@@ -2,6 +2,8 @@ package web_test
 
 import (
 	"context"
+	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
@@ -43,6 +45,10 @@ type fakeProvider struct {
 	options chat.Options
 	deltas  []string
 
+	// err is returned once the deltas are out, standing in for a turn that
+	// fails partway through an answer the learner is already reading.
+	err error
+
 	mu     sync.Mutex
 	turn   chat.Turn
 	turns  int
@@ -61,7 +67,7 @@ func (f *fakeProvider) Send(_ context.Context, turn chat.Turn, emit func(delta s
 		}
 	}
 
-	return nil
+	return f.err
 }
 
 func (f *fakeProvider) Reset() {
@@ -160,6 +166,29 @@ func ask(t *testing.T, h http.Handler, target, remoteAddr, body string) *httptes
 	return serve(t, h, r)
 }
 
+// doneHTML returns the payload of the stream's done event, or "" when there was
+// none. Splitting on a blank line is safe because writeEvent JSON-encodes every
+// payload, so no frame contains a literal newline.
+func doneHTML(t *testing.T, body string) string {
+	t.Helper()
+
+	for frame := range strings.SplitSeq(body, "\n\n") {
+		name, data, ok := strings.Cut(frame, "\ndata: ")
+		if !ok || name != "event: done" {
+			continue
+		}
+
+		var payload string
+		if err := json.Unmarshal([]byte(data), &payload); err != nil {
+			t.Fatalf("decoding the done payload %s: %v", data, err)
+		}
+
+		return payload
+	}
+
+	return ""
+}
+
 func TestChatStreamsAnAnswerGroundedInTheCard(t *testing.T) {
 	t.Parallel()
 
@@ -226,6 +255,83 @@ func TestChatStreamsAnAnswerGroundedInTheCard(t *testing.T) {
 			t.Errorf("Effort = %q, want empty when the request named none", turn.Effort)
 		}
 	})
+}
+
+// The fence is split across two deltas because that is what a real stream does
+// to it, and because it is what fails if rendering is ever moved into the
+// per-delta path: half a fenced block does not parse as one.
+func TestChatDoneCarriesRenderedHTML(t *testing.T) {
+	t.Parallel()
+
+	fake := newFake()
+	fake.deltas = []string{"Try:\n\n```go\nfmt.Prin", "tln(\"hi\")\n```\n"}
+	h := chatServer(t, fake)
+
+	rec := ask(t, h, "/chat", "127.0.0.1:54321", `{"card":"chat-card","message":"show me"}`)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, body: %s", rec.Code, rec.Body)
+	}
+
+	if got := doneHTML(t, rec.Body.String()); !strings.Contains(got, `<pre><code class="language-go">`) {
+		t.Errorf("the done event carries no rendered code block:\n%s", got)
+	}
+
+	// Streaming is the other half of the contract: the deltas stay raw markdown
+	// so the answer still appears as it is written.
+	if body := rec.Body.String(); !strings.Contains(body, "```go") {
+		t.Errorf("the delta frames no longer carry raw markdown:\n%s", body)
+	}
+}
+
+// The panel renders model output, which is not the trusted compile-time deck
+// content the same renderer was built for. This is what fails if goldmark is
+// ever put into Unsafe mode for a card-authoring reason.
+func TestChatRenderedAnswerOmitsRawHTML(t *testing.T) {
+	t.Parallel()
+
+	fake := newFake()
+	fake.deltas = []string{"<script>alert(1)</script>\n\n", "[x](javascript:alert(1))"}
+	h := chatServer(t, fake)
+
+	rec := ask(t, h, "/chat", "127.0.0.1:54321", `{"card":"chat-card","message":"hi"}`)
+	got := doneHTML(t, rec.Body.String())
+
+	// Without this the test passes on an empty payload, which is exactly the
+	// state it is meant to outlive.
+	if !strings.Contains(got, `<a href="">x</a>`) {
+		t.Fatalf("the answer did not render, so the assertions below prove nothing:\n%s", got)
+	}
+
+	for _, unwanted := range []string{"<script", "javascript:"} {
+		if strings.Contains(got, unwanted) {
+			t.Errorf("the rendered answer contains %q — goldmark is in Unsafe mode:\n%s", unwanted, got)
+		}
+	}
+}
+
+// A turn that dies partway has partial markdown, and half a fenced block
+// renders as something other than what arrived. The partial answer stays as the
+// plain text it streamed as.
+func TestChatFailedTurnSendsNoRenderedAnswer(t *testing.T) {
+	t.Parallel()
+
+	fake := newFake()
+	fake.err = errors.New("the provider hung up")
+	h := chatServer(t, fake)
+
+	body := ask(t, h, "/chat", "127.0.0.1:54321", `{"card":"chat-card","message":"hi"}`).Body.String()
+
+	if !strings.Contains(body, "event: error") {
+		t.Errorf("a failed turn reported no error:\n%s", body)
+	}
+
+	if strings.Contains(body, "event: done") {
+		t.Errorf("a failed turn still sent a rendered answer:\n%s", body)
+	}
+
+	if !strings.Contains(body, `"A Pod is "`) {
+		t.Errorf("the partial answer was dropped:\n%s", body)
+	}
 }
 
 func TestChatPassesTheSelectedModelAndEffort(t *testing.T) {

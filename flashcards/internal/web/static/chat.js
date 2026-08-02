@@ -31,6 +31,46 @@
     return card ? card.dataset.card || '' : '';
   }
 
+  // The answer streams as plain text and is replaced, once, by the server's
+  // rendered markdown when the turn completes. The `md` class is what stops
+  // .chat-msg's pre-wrap from showing every newline goldmark left inside a <p>.
+  function render(el, html) {
+    if (!html) return;
+
+    el.innerHTML = html;
+    el.classList.add('md');
+
+    log.scrollTop = log.scrollHeight;
+
+    // A diagram arrives as <pre class="mermaid"> and nothing else draws it: the
+    // page's htmx:afterSwap hook (layout.html) never fires for chat, which is
+    // not htmx.
+    var diagrams = el.querySelectorAll('pre.mermaid:not([data-processed])');
+    if (!window.mermaid || !diagrams.length) return;
+
+    // Deck diagrams are gated by TestDiagramStyle before they ship; one a model
+    // improvised mid-answer is not, so a diagram that will not parse has to
+    // degrade well. Two options are needed and neither is enough alone:
+    // suppressErrors stops run() throwing and abandoning later nodes, and
+    // suppressErrorRendering (layout.html) stops the error graphic. Together
+    // they leave the node emptied and drawn as nothing — a silent gap — so the
+    // source is stashed first and put back on anything that did not render.
+    var sources = Array.prototype.map.call(diagrams, function (node) {
+      return node.textContent;
+    });
+
+    window.mermaid.run({ nodes: diagrams, suppressErrors: true }).finally(function () {
+      Array.prototype.forEach.call(diagrams, function (node, i) {
+        if (node.querySelector('svg')) return;
+
+        node.textContent = sources[i];
+        node.dataset.failed = 'true';
+      });
+
+      log.scrollTop = log.scrollHeight;
+    });
+  }
+
   // One frame is "event: <name>\ndata: <json>". The payload is JSON so an
   // answer containing blank lines cannot terminate its own event.
   function handleFrame(frame, answer) {
@@ -47,7 +87,11 @@
     if (name === 'delta') {
       answer.textContent += JSON.parse(data);
       log.scrollTop = log.scrollHeight;
+    } else if (name === 'done') {
+      render(answer, JSON.parse(data));
     } else if (name === 'error') {
+      // Deliberately no render: a turn that died partway has partial markdown,
+      // and the plain text it already streamed is what actually arrived.
       answer.className = 'chat-msg err';
       answer.textContent += (answer.textContent ? '\n\n' : '') + JSON.parse(data);
     }

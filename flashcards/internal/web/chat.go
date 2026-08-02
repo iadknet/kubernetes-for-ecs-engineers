@@ -173,7 +173,15 @@ func (s *Server) handleChat(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("X-Content-Type-Options", "nosniff")
 	w.WriteHeader(http.StatusOK)
 
+	// The answer is relayed as plain text and rendered once, at the end. Deltas
+	// arrive mid-token, so there is no point in the stream where the accumulated
+	// text is guaranteed to be parseable markdown — half a fenced block renders
+	// as something other than what arrived.
+	var answer strings.Builder
+
 	err := s.chat.Send(r.Context(), turn, func(delta string) error {
+		answer.WriteString(delta)
+
 		if err := writeEvent(w, "delta", delta); err != nil {
 			return err
 		}
@@ -201,7 +209,10 @@ func (s *Server) handleChat(w http.ResponseWriter, r *http.Request) {
 	} else {
 		slog.Info("chat turn", "card", card, "model", turn.Model, "effort", turn.Effort, "dur", dur)
 
-		_ = writeEvent(w, "done", "")
+		// The panel replaces its plain-text bubble with this. It is the same
+		// renderer the card beside it went through, so a tutor answer and a deck
+		// answer are styled identically — see the trust note at markdown().
+		_ = writeEvent(w, "done", string(s.markdown(answer.String())))
 	}
 
 	_ = rc.Flush() // the turn is over; a failed flush means the client already left

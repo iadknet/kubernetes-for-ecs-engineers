@@ -42,6 +42,15 @@
               flex: 1; min-height: 0; overflow-y: auto; }
   .chat-log:empty { display: none; }
   .chat-msg { white-space: pre-wrap; font-size: .9375rem; }
+  /* Set once the streamed answer is replaced by rendered markdown. pre-wrap is
+     what makes the plain text readable on the way in and what would double every
+     line break on the way out, since goldmark keeps the source newlines inside
+     its <p>. Scoped to a class so streaming text and the `you` bubble keep it.
+     The gap above already spaces messages; block margins would add a second. */
+  .chat-msg.md { white-space: normal; }
+  .chat-msg.md > :first-child { margin-top: 0; }
+  .chat-msg.md > :last-child { margin-bottom: 0; }
+  .chat-msg.md ul, .chat-msg.md ol { padding-left: 1.25rem; }
   .chat-msg.you { color: var(--muted); border-left: 3px solid var(--line); padding-left: .75rem; }
   .chat-msg.note { color: var(--muted); font-size: .8125rem; }
   .chat-msg.err { color: var(--again); }

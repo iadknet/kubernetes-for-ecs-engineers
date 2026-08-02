@@ -39,6 +39,9 @@
   /* A diagram is a picture, not a code listing: undo the bare-`pre` code-block
      framing above, but keep it scrollable on a narrow viewport. */
   pre.mermaid { background: none; padding: .5rem 0; text-align: center; }
+  /* Put back for a diagram that would not parse: chat.js restores its source,
+     and source is a code listing again. */
+  pre.mermaid[data-failed] { background: var(--code-bg); padding: .75rem 1rem; text-align: left; }
 
   .card { background: var(--card); border: 1px solid var(--line); border-radius: 10px;
           padding: 1.5rem; margin-bottom: 1rem; }
@@ -119,8 +122,15 @@
   // renders, so re-theming a drawn diagram would mean re-injecting its source;
   // an OS theme change mid-session therefore restyles the page but leaves
   // diagrams as they were until reload. Fine for a local single-user tool.
+  // suppressErrorRendering is what keeps a diagram that will not parse as
+  // visible source instead of mermaid's error graphic. It is separate from the
+  // run() option of a similar name, which only stops the throw: without this,
+  // an unparseable block is replaced by a bomb icon. Deck diagrams are lint-
+  // gated and reviewed, but the chat panel renders diagrams a model improvised,
+  // and there the source is the more useful failure.
   mermaid.initialize({
     startOnLoad: true,
+    suppressErrorRendering: true,
     theme: window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'neutral',
   });
 

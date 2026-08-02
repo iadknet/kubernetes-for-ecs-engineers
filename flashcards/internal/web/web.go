@@ -317,12 +317,19 @@ func (s *Server) markdown(src string) template.HTML {
 		//nolint:gosec // G203: src is run through template.HTMLEscapeString on this path.
 		return template.HTML("<p>" + template.HTMLEscapeString(src) + "</p>")
 	}
-	// G203 is a real trust boundary here, not a false positive: goldmark passes raw
-	// HTML in its input straight through, so this trusts deck content. That holds
-	// because decks are authored in-repo and compiled into the binary via embed.FS.
-	// If decks ever become user-supplied, this needs a sanitizer (e.g. bluemonday)
-	// or goldmark configured with html.WithEscapedOutput.
-	//nolint:gosec // G203: deck content is trusted, compile-time input. See comment above.
+	// G203 is a real trust boundary, and what makes it safe is not the caller: it
+	// is that goldmark's HTML renderer is left in its default non-Unsafe mode, so
+	// raw HTML in *any* input is replaced with an omitted-HTML comment and a
+	// javascript: or data: URL renders with an empty href. That has to hold for
+	// every input, because two callers arrive here and only one is trusted —
+	// cards are authored in-repo and compiled in via embed.FS, while the chat
+	// panel renders model output (chat.go, handleChat).
+	//
+	// So: do not add html.WithUnsafe() to the goldmark instance above. It would
+	// read as a card-authoring convenience and would quietly make an answer from
+	// the chat provider executable. TestChatRenderedAnswerOmitsRawHTML is what
+	// turns that edit into a failing build.
+	//nolint:gosec // G203: goldmark is non-Unsafe, so raw HTML is omitted. See comment above.
 	return template.HTML(buf.String())
 }
 
