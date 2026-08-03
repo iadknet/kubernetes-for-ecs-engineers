@@ -1,6 +1,7 @@
 package web_test
 
 import (
+	"maps"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -8,6 +9,7 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"testing/fstest"
 	"time"
@@ -129,11 +131,11 @@ func TestInternalErrorsAreNotLeakedToTheClient(t *testing.T) {
 	}
 }
 
-func do(t *testing.T, h http.Handler, method, target string) *httptest.ResponseRecorder {
-	t.Helper()
+func do(tb testing.TB, h http.Handler, method, target string) *httptest.ResponseRecorder {
+	tb.Helper()
 
 	rec := httptest.NewRecorder()
-	h.ServeHTTP(rec, httptest.NewRequestWithContext(t.Context(), method, target, nil))
+	h.ServeHTTP(rec, httptest.NewRequestWithContext(tb.Context(), method, target, nil))
 
 	return rec
 }
@@ -448,6 +450,15 @@ cards:
 func serverOver(t *testing.T, decks map[string]string) (http.Handler, *deck.Library, *review.Store) {
 	t.Helper()
 
+	return serverWith(t, decks, web.Config{})
+}
+
+// serverWith is serverOver with the server's collaborators supplied — the clock,
+// for every caller here. It takes testing.TB so BenchmarkDrill can share the
+// fixture rather than growing its own copy of it.
+func serverWith(tb testing.TB, decks map[string]string, cfg web.Config) (http.Handler, *deck.Library, *review.Store) {
+	tb.Helper()
+
 	files := fstest.MapFS{}
 	for name, body := range decks {
 		files["decks/"+name] = &fstest.MapFile{Data: []byte(body)}
@@ -455,17 +466,17 @@ func serverOver(t *testing.T, decks map[string]string) (http.Handler, *deck.Libr
 
 	lib, err := deck.Load(files, "decks")
 	if err != nil {
-		t.Fatal(err)
+		tb.Fatal(err)
 	}
 
-	store, err := review.Open(filepath.Join(t.TempDir(), "review.json"), 20)
+	store, err := review.Open(filepath.Join(tb.TempDir(), "review.json"), 20)
 	if err != nil {
-		t.Fatal(err)
+		tb.Fatal(err)
 	}
 
-	srv, err := web.New(lib, store, web.Config{})
+	srv, err := web.New(lib, store, cfg)
 	if err != nil {
-		t.Fatal(err)
+		tb.Fatal(err)
 	}
 
 	return srv.Routes(), lib, store
@@ -614,14 +625,21 @@ func recognitionServer(t *testing.T) (http.Handler, *review.Store) {
 func master(t *testing.T, store *review.Store, id string) {
 	t.Helper()
 
-	now := time.Now()
+	masterAt(t, store, id, time.Now())
+}
+
+// masterAt is master on a caller-chosen day, for a test whose server runs on a
+// fixed clock: grading on real time would put the reviews on a different day
+// from the one the server thinks it is.
+func masterAt(t *testing.T, store *review.Store, id string, base time.Time) {
+	t.Helper()
 
 	for i := range 10 {
 		if store.Mastered(id) {
 			return
 		}
 
-		if _, err := store.Grade(id, review.Easy, now.AddDate(0, 0, i)); err != nil {
+		if _, err := store.Grade(id, review.Easy, base.AddDate(0, 0, i)); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -848,10 +866,28 @@ cards:
       Rubric: full credit names cluster, user and namespace.
 `
 
+// checkpointDecks is the module the checkpoint tests sit: two ordinary cards to
+// master and a two-question exam over them.
+func checkpointDecks() map[string]string {
+	return map[string]string{"01-foundations.yaml": checkpointModule}
+}
+
 func checkpointServer(t *testing.T) (http.Handler, *review.Store) {
 	t.Helper()
 
-	h, _, store := serverOver(t, map[string]string{"01-foundations.yaml": checkpointModule})
+	h, _, store := serverOver(t, checkpointDecks())
+
+	return h, store
+}
+
+// checkpointServerAt is checkpointServer on a fixed clock, for the tests that
+// assert on a date the server derived. Reading time.Now() in the test and
+// comparing it against a date the server read for itself is a midnight away
+// from failing.
+func checkpointServerAt(t *testing.T, at time.Time) (http.Handler, *review.Store) {
+	t.Helper()
+
+	h, _, store := serverWith(t, checkpointDecks(), web.Config{Now: fixedClock(at)})
 
 	return h, store
 }
@@ -861,22 +897,15 @@ func checkpointServer(t *testing.T) (http.Handler, *review.Store) {
 func masterM0(t *testing.T, store *review.Store) {
 	t.Helper()
 
-	now := time.Now()
+	masterM0At(t, store, time.Now())
+}
+
+// masterM0At is masterM0 on a caller-chosen day. See masterAt.
+func masterM0At(t *testing.T, store *review.Store, base time.Time) {
+	t.Helper()
 
 	for _, id := range []string{"m0-one", "m0-two"} {
-		for i := range 10 {
-			if store.Mastered(id) {
-				break
-			}
-
-			if _, err := store.Grade(id, review.Easy, now.AddDate(0, 0, i)); err != nil {
-				t.Fatal(err)
-			}
-		}
-
-		if !store.Mastered(id) {
-			t.Fatalf("card %q never reached Review state", id)
-		}
+		masterAt(t, store, id, base)
 	}
 }
 
@@ -885,14 +914,23 @@ func masterM0(t *testing.T, store *review.Store) {
 func sitCheckpoint(t *testing.T, h http.Handler, grade int) string {
 	t.Helper()
 
-	if rec := do(t, h, "GET", "/checkpoint?module=M0"); rec.Code != http.StatusOK {
+	return sitCheckpointAs(t, h, "M0", grade)
+}
+
+// sitCheckpointAs is sitCheckpoint with the module spelled as the caller
+// chooses, which is the whole point: the URL is where a non-canonical name
+// gets in.
+func sitCheckpointAs(t *testing.T, h http.Handler, module string, grade int) string {
+	t.Helper()
+
+	if rec := do(t, h, "GET", "/checkpoint?module="+module); rec.Code != http.StatusOK {
 		t.Fatalf("opening the checkpoint = %d: %s", rec.Code, rec.Body)
 	}
 
 	body := ""
 
 	for _, id := range []string{"m0-checkpoint-split", "m0-checkpoint-contexts"} {
-		rec := do(t, h, "POST", "/checkpoint/"+id+"/grade?module=M0&g="+strconv.Itoa(grade))
+		rec := do(t, h, "POST", "/checkpoint/"+id+"/grade?module="+module+"&g="+strconv.Itoa(grade))
 		if rec.Code != http.StatusOK {
 			t.Fatalf("grading %q = %d: %s", id, rec.Code, rec.Body)
 		}
@@ -949,30 +987,77 @@ func TestCheckpointIsOfferedOnceTheModuleIsMastered(t *testing.T) {
 func TestCheckpointPassIsRecordedAndShownOnTheIndex(t *testing.T) {
 	t.Parallel()
 
-	h, store := checkpointServer(t)
-	masterM0(t, store)
+	h, store := checkpointServerAt(t, clockStart)
+	masterM0At(t, store, clockStart)
 
 	if got := sitCheckpoint(t, h, int(review.Good)); !strings.Contains(got, "Passed") {
 		t.Errorf("a clean sweep should report a pass, got: %s", got)
 	}
 
 	body := do(t, h, "GET", "/").Body.String()
-	if !strings.Contains(body, "Passed on "+time.Now().Format("2006-01-02")) {
+	if !strings.Contains(body, "Passed on "+clockStart.Format("2006-01-02")) {
 		t.Errorf("the index should show M0's checkpoint as passed, with the date; got: %s", body)
+	}
+}
+
+func TestCheckpointPassIsRecordedUnderTheCanonicalModule(t *testing.T) {
+	t.Parallel()
+
+	h, lib, store := serverWith(t, checkpointDecks(), web.Config{Now: fixedClock(clockStart)})
+	masterM0At(t, store, clockStart)
+
+	if got := sitCheckpointAs(t, h, "m0", int(review.Good)); !strings.Contains(got, "Passed") {
+		t.Errorf("a clean sweep should report a pass, got: %s", got)
+	}
+
+	// The module's own page, read through the canonical spelling.
+	body := do(t, h, "GET", "/checkpoint?module=M0").Body.String()
+	if !strings.Contains(body, "Passed") {
+		t.Errorf("GET /checkpoint?module=M0 should show the pass recorded under m0, got: %s", body)
+	}
+
+	// The index.
+	body = do(t, h, "GET", "/").Body.String()
+	if !strings.Contains(body, "Passed on "+clockStart.Format("2006-01-02")) {
+		t.Errorf("the index should show M0's checkpoint as passed; got: %s", body)
+	}
+
+	// The drill's withholding gate: withheld excludes an unpassed checkpoint
+	// card from Total entirely, so seeing both cards counted proves the pass
+	// released them.
+	if got := store.Stats(lib.Checkpoints("M0"), clockStart).Total; got != 2 {
+		t.Errorf("Stats(Checkpoints(\"M0\")).Total = %d, want 2 (both cards released)", got)
+	}
+}
+
+func TestCheckpointPageLinksUseTheCanonicalModule(t *testing.T) {
+	t.Parallel()
+
+	h, store := checkpointServerAt(t, clockStart)
+	masterM0At(t, store, clockStart)
+
+	body := do(t, h, "GET", "/checkpoint?module=m0").Body.String()
+
+	if !strings.Contains(body, "module=M0") {
+		t.Errorf("checkpoint page should link with the canonical module, got: %s", body)
+	}
+
+	if strings.Contains(body, "module=m0") {
+		t.Errorf("checkpoint page should not carry the non-canonical spelling forward, got: %s", body)
 	}
 }
 
 func TestCheckpointFailureNamesTheRetryDate(t *testing.T) {
 	t.Parallel()
 
-	h, store := checkpointServer(t)
-	masterM0(t, store)
+	h, store := checkpointServerAt(t, clockStart)
+	masterM0At(t, store, clockStart)
 
 	if got := sitCheckpoint(t, h, int(review.Again)); !strings.Contains(got, "Failed") {
 		t.Errorf("an Again should fail the attempt, got: %s", got)
 	}
 
-	tomorrow := time.Now().AddDate(0, 0, 1).Format("2006-01-02")
+	tomorrow := clockStart.AddDate(0, 0, 1).Format("2006-01-02")
 
 	// Both the retake page and the index have to say when it reopens.
 	for _, path := range []string{"/checkpoint?module=M0", "/"} {
@@ -1089,4 +1174,233 @@ func TestChatSurfaceIsAbsentWithoutAProvider(t *testing.T) {
 			}
 		}
 	})
+}
+
+// --- The clock ---------------------------------------------------------------
+
+// clockStart is the instant the clocks in this file start at.
+//
+// It is explicitly UTC. review.Day formats an instant in that instant's own
+// location, so a time.Local start would put the day boundary somewhere different
+// on a CI box in another zone — the same class of latent flakiness these clocks
+// exist to remove.
+var clockStart = time.Date(2026, 3, 14, 9, 0, 0, 0, time.UTC)
+
+// steppingClock returns a clock starting at start that advances by step on every
+// read, and a func reporting how many reads have happened.
+//
+// The step is the point, not the count: a handler that reads twice sees two
+// different instants, and far enough apart they are two different days. The
+// count is just the cheapest way to observe that from outside.
+//
+// The counter is atomic because every test here runs in parallel and nothing
+// promises a handler is served on the goroutine that asked.
+func steppingClock(start time.Time, step time.Duration) (func() time.Time, func() int) {
+	var reads atomic.Int64
+
+	now := func() time.Time { return start.Add(time.Duration(reads.Add(1)-1) * step) }
+
+	return now, func() int { return int(reads.Load()) }
+}
+
+// fixedClock returns a clock frozen at at, for a test asserting on a date rather
+// than on how often the clock was read.
+func fixedClock(at time.Time) func() time.Time {
+	return func() time.Time { return at }
+}
+
+// The clock fixture has to reach every route, so it pairs a glossary still being
+// recognised — which is what /drill and /pick need — with a module whose
+// ordinary cards are mastered, which is what makes its checkpoint sittable.
+// Terms carry no module, so mastering M0 leaves them untouched.
+const clockGlossary = `
+deck: Glossary
+tags: [glossary]
+cards:
+  - id: term-pod
+    term: Pod
+    q: |
+      Pod
+    a: |
+      The smallest deployable unit.
+  - id: term-node
+    term: node
+    q: |
+      node
+    a: |
+      A machine that runs workloads.
+`
+
+// clockDecks is one fixture that reaches every route: the glossary above for
+// /drill and /pick, and the checkpoint module for the three checkpoint routes.
+func clockDecks() map[string]string {
+	decks := map[string]string{"00-glossary.yaml": clockGlossary}
+	maps.Copy(decks, checkpointDecks())
+
+	return decks
+}
+
+// drillPath is the unfiltered drill route, named because the tests below reach
+// for it often enough that repeating the literal reads as three separate strings
+// rather than one route.
+const drillPath = "/drill"
+
+// clockServer builds a server whose clock counts its reads, with M0 mastered so
+// the checkpoint routes are reachable.
+func clockServer(t *testing.T) (http.Handler, func() int) {
+	t.Helper()
+
+	now, reads := steppingClock(clockStart, time.Second)
+
+	h, _, store := serverWith(t, clockDecks(), web.Config{Now: now})
+
+	masterM0At(t, store, clockStart)
+
+	return h, reads
+}
+
+// The day boundary is where a second clock read stops being a style question.
+// A request that starts at 23:59:59 and reads the clock again a moment later
+// renders one day's card beside another day's counts.
+func TestDrillIsConsistentAcrossMidnight(t *testing.T) {
+	t.Parallel()
+
+	midnight := time.Date(2026, 3, 15, 0, 0, 0, 0, time.UTC)
+
+	// A tenth of a second before midnight, stepping by a second: the first read
+	// lands on the day before, every read after it on the day after.
+	now, _ := steppingClock(midnight.Add(-100*time.Millisecond), time.Second)
+
+	h, _, store := serverWith(t, map[string]string{"test.yaml": testDeck}, web.Config{Now: now})
+
+	// One review recorded an hour earlier, so the day the request began on has a
+	// count the day after it does not.
+	if _, err := store.Grade("card-two", review.Good, midnight.Add(-time.Hour)); err != nil {
+		t.Fatal(err)
+	}
+
+	rec := do(t, h, http.MethodGet, drillPath)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, body: %s", rec.Code, rec.Body)
+	}
+
+	if body := rec.Body.String(); !strings.Contains(body, "1 reviewed today") {
+		t.Errorf("a request that began before midnight rendered counts from after it:\n%s", body)
+	}
+}
+
+// The counts a grade returns have to include that grade, which fixes where the
+// scope snapshot is built: after the write, never at the top of the handler.
+// Nothing else in this suite asserts a value in the drill-stats bar, so nothing
+// else catches getting that order backwards.
+func TestGradeCountsTheAnswerItJustRecorded(t *testing.T) {
+	t.Parallel()
+
+	h, _, _ := serverWith(t,
+		map[string]string{"test.yaml": testDeck},
+		web.Config{Now: fixedClock(clockStart)})
+
+	rec := do(t, h, http.MethodPost, "/drill/card-one/grade?g=3")
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, body: %s", rec.Code, rec.Body)
+	}
+
+	if body := rec.Body.String(); !strings.Contains(body, "1 reviewed today") {
+		t.Errorf("the fragment a grade returns does not count that grade:\n%s", body)
+	}
+}
+
+// BenchmarkDrill measures a whole drill request: scope selection, prerequisite
+// expansion, stats, card selection and rendering. It is the measurement behind
+// "the scope is computed once" — recomputing it is invisible in the response but
+// shows up here as allocations.
+func BenchmarkDrill(b *testing.B) {
+	h, _, _ := serverWith(b, clockDecks(), web.Config{Now: fixedClock(clockStart)})
+
+	// A frozen clock and a read-only route, so every iteration does the same work
+	// over the same store state.
+	req := httptest.NewRequestWithContext(b.Context(), http.MethodGet, drillPath, nil)
+
+	b.ReportAllocs()
+
+	for b.Loop() {
+		rec := httptest.NewRecorder()
+
+		h.ServeHTTP(rec, req)
+
+		if rec.Code != http.StatusOK {
+			b.Fatalf("GET %s = %d: %s", drillPath, rec.Code, rec.Body)
+		}
+	}
+}
+
+// One request, one view of time. Two clock reads in a handler are two different
+// instants, and any value keyed on the day — a review counter, a streak, a daily
+// option seed — can then disagree with itself inside a single rendered page.
+// This is the only durable form that rule takes: it fails the build when a
+// second read appears anywhere down the call stack.
+func TestHandlersReadTheClockOnce(t *testing.T) {
+	t.Parallel()
+
+	// A checkpoint card can only be revealed or graded inside an open attempt,
+	// which is what opening the checkpoint page starts.
+	openCheckpoint := func(t *testing.T, h http.Handler) {
+		t.Helper()
+
+		if rec := do(t, h, http.MethodGet, "/checkpoint?module=M0"); rec.Code != http.StatusOK {
+			t.Fatalf("opening the checkpoint = %d: %s", rec.Code, rec.Body)
+		}
+	}
+
+	tests := []struct {
+		name, method, target string
+		// setup runs before the request under test, for a route that needs state
+		// another route creates. Its own clock reads are not counted.
+		setup func(t *testing.T, h http.Handler)
+		reads int
+	}{
+		{name: "index", method: http.MethodGet, target: "/", reads: 1},
+		{name: "browse", method: http.MethodGet, target: "/browse", reads: 0},
+		{name: "liveness", method: http.MethodGet, target: "/healthz", reads: 0},
+		{name: "readiness", method: http.MethodGet, target: "/readyz", reads: 0},
+		{name: "drill", method: http.MethodGet, target: drillPath, reads: 1},
+		{name: "reveal", method: http.MethodPost, target: "/drill/term-pod/reveal", reads: 1},
+		{name: "grade", method: http.MethodPost, target: "/drill/m0-one/grade?g=3", reads: 1},
+		{name: "pick", method: http.MethodPost, target: "/drill/term-pod/pick?p=term-pod", reads: 1},
+		{name: "advance", method: http.MethodPost, target: "/drill/term-pod/advance", reads: 1},
+		{name: "checkpoint", method: http.MethodGet, target: "/checkpoint?module=M0", reads: 1},
+		{
+			name: "checkpoint reveal", method: http.MethodPost,
+			target: "/checkpoint/m0-checkpoint-split/reveal?module=M0",
+			setup:  openCheckpoint, reads: 1,
+		},
+		{
+			name: "checkpoint grade", method: http.MethodPost,
+			target: "/checkpoint/m0-checkpoint-split/grade?module=M0&g=3",
+			setup:  openCheckpoint, reads: 1,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			h, reads := clockServer(t)
+			if tt.setup != nil {
+				tt.setup(t, h)
+			}
+
+			before := reads()
+
+			rec := do(t, h, tt.method, tt.target)
+			if rec.Code != http.StatusOK {
+				t.Fatalf("%s %s = %d: %s", tt.method, tt.target, rec.Code, rec.Body)
+			}
+
+			if got := reads() - before; got != tt.reads {
+				t.Errorf("%s %s read the clock %d times, want %d",
+					tt.method, tt.target, got, tt.reads)
+			}
+		})
+	}
 }

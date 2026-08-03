@@ -29,12 +29,17 @@ import (
 var assets embed.FS
 
 // Config carries the optional collaborators a server is built with. Its zero
-// value is the shipped configuration: no chat, no extra routes.
+// value is the shipped configuration: no chat, no extra routes, the real clock.
 type Config struct {
 	// Chat enables the drill view's chat panel. Nil — the default — leaves the
 	// chat routes unregistered and the panel markup unrendered, so a build with
 	// the feature compiled in is byte-for-byte the build without it.
 	Chat chat.Provider
+
+	// Now is the clock the server reads. Nil — the default — is time.Now. It
+	// exists so time-dependent behavior can be asserted rather than observed to
+	// be probably right; the process never sets it.
+	Now func() time.Time
 }
 
 // Server holds everything the handlers need.
@@ -57,12 +62,17 @@ func New(lib *deck.Library, store *review.Store, cfg Config) (*Server, error) {
 		return nil, fmt.Errorf("parsing templates: %w", err)
 	}
 
+	now := cfg.Now
+	if now == nil {
+		now = time.Now
+	}
+
 	return &Server{
 		lib:   lib,
 		store: store,
 		tmpl:  tmpl,
 		md:    goldmark.New(goldmark.WithExtensions(extension.GFM, mermaidExtender())),
-		now:   time.Now,
+		now:   now,
 		chat:  cfg.Chat,
 	}, nil
 }
@@ -160,7 +170,60 @@ func (f filter) Label() string {
 	return strings.Join(parts, " · ")
 }
 
+// drillScope is one request's view of a drill: the cards in scope, the stats
+// over them, and the instant all of it was computed at. It is built once per
+// request and passed down, so the card, the stats bar, the scheduler and the
+// multiple-choice seed all agree about which cards are in scope and what day it
+// is.
+//
+// Built and read on one handler goroutine and never stored on Server, so it
+// needs no synchronization. It is passed by value despite being ~190 bytes —
+// over the usual threshold for a pointer — because a per-request snapshot that
+// no callee may mutate is worth the copy at the handful of call sites per
+// request.
+type drillScope struct {
+	filter filter
+	now    time.Time
+	cards  []deck.Card
+	terms  int
+	stats  review.Stats
+}
+
+// newDrillScope computes the set of cards a drill covers — the filter's own
+// cards plus any prerequisite terms they depend on, and how many of those were
+// pulled in — along with the stats over the result.
+//
+// Cram is left unexpanded: it ignores gating entirely, so pulling in terms would
+// only dilute the scope the reviewer actually asked for.
+//
+// now is a parameter rather than a clock read, because a handler that records an
+// answer needs the instant before it needs the snapshot: it reads the clock,
+// writes, and only then snapshots, so the counts it renders include the answer
+// just given.
+//
+// stats is computed eagerly rather than lazily because every drill fragment
+// renders the drill-stats bar, so it is always needed exactly once. handleBrowse
+// needs neither stats nor expansion and calls lib.Select directly.
+func (s *Server) newDrillScope(f filter, now time.Time) drillScope {
+	selected := s.lib.Select(f.Filter)
+	sc := drillScope{filter: f, now: now, cards: selected}
+
+	if !f.Cram {
+		expanded := s.lib.WithPrerequisites(selected)
+		sc.cards, sc.terms = expanded, len(expanded)-len(selected)
+	}
+
+	sc.stats = s.store.Stats(sc.cards, now)
+
+	return sc
+}
+
 // cardView is one card prepared for rendering.
+//
+// Stats and Terms belong to the drill scope, not to the card: every card
+// fragment re-renders the drill-stats bar as an htmx out-of-band swap, so the
+// scope's counts have to travel with the card. They are copied off the request's
+// drillScope rather than recomputed per card.
 type cardView struct {
 	Card   deck.Card
 	Q      template.HTML
@@ -199,12 +262,15 @@ func (v cardView) WasCorrect() bool { return v.Picked == v.Card.ID }
 // nothing new is persisted, so the state file's format is untouched. A card in
 // Review has been retained and goes back to free recall, which stays the
 // retention bar; recognition is only the on-ramp.
-func (s *Server) choices(c deck.Card) []choiceView {
+//
+// now is passed rather than read here so the option seed and the review counters
+// share one definition of "today" — which is what review.Day exists for.
+func (s *Server) choices(c deck.Card, now time.Time) []choiceView {
 	if c.Term == "" || s.store.Mastered(c.ID) {
 		return nil
 	}
 
-	opts := s.lib.Options(c, review.Day(s.now()))
+	opts := s.lib.Options(c, review.Day(now))
 	if len(opts) < 2 {
 		return nil // a glossary too small to offer a real choice
 	}
@@ -251,35 +317,17 @@ func (v cardView) sep() string {
 	return "&"
 }
 
-func (s *Server) view(c deck.Card, f filter) cardView {
-	cards, terms := s.scope(f)
-
+func (s *Server) view(c deck.Card, sc drillScope) cardView {
 	return cardView{
 		Card:    c,
 		Q:       s.markdown(c.Q),
 		A:       s.markdown(c.A),
 		ECS:     s.markdown(c.ECS),
-		Filter:  f,
-		Stats:   s.store.Stats(cards, s.now()),
-		Terms:   terms,
-		Choices: s.choices(c),
+		Filter:  sc.filter,
+		Stats:   sc.stats,
+		Terms:   sc.terms,
+		Choices: s.choices(c, sc.now),
 	}
-}
-
-// scope is the set of cards a drill covers: the filter's own cards plus any
-// prerequisite terms they depend on, and how many of those were pulled in.
-//
-// Cram is left unexpanded: it ignores gating entirely, so pulling in terms
-// would only dilute the scope the reviewer actually asked for.
-func (s *Server) scope(f filter) (cards []deck.Card, terms int) {
-	selected := s.lib.Select(f.Filter)
-	if f.Cram {
-		return selected, 0
-	}
-
-	expanded := s.lib.WithPrerequisites(selected)
-
-	return expanded, len(expanded) - len(selected)
 }
 
 // mermaidExtender renders ```mermaid blocks as <pre class="mermaid"> for the
@@ -333,18 +381,17 @@ func (s *Server) markdown(src string) template.HTML {
 	return template.HTML(buf.String())
 }
 
-// next picks the card to show under the current filter.
-func (s *Server) next(f filter, exclude string) (deck.Card, bool) {
-	cards, _ := s.scope(f)
-	if len(cards) == 0 {
+// next picks the card to show from the scope already computed.
+func (s *Server) next(sc drillScope, exclude string) (deck.Card, bool) {
+	if len(sc.cards) == 0 {
 		return deck.Card{}, false
 	}
 
-	if f.Cram {
-		return s.store.Cram(cards, exclude)
+	if sc.filter.Cram {
+		return s.store.Cram(sc.cards, exclude)
 	}
 
-	return s.store.Next(cards, s.now())
+	return s.store.Next(sc.cards, sc.now)
 }
 
 func (s *Server) handleIndex(w http.ResponseWriter, _ *http.Request) {
@@ -388,19 +435,19 @@ func (s *Server) handleIndex(w http.ResponseWriter, _ *http.Request) {
 }
 
 func (s *Server) handleDrill(w http.ResponseWriter, r *http.Request) {
-	f := filterFrom(r)
-	card, ok := s.next(f, "")
-	cards, terms := s.scope(f)
+	sc := s.newDrillScope(filterFrom(r), s.now())
+
+	card, ok := s.next(sc, "")
 
 	data := map[string]any{
-		"Filter":  f,
-		"Stats":   s.store.Stats(cards, s.now()),
-		"Terms":   terms,
+		"Filter":  sc.filter,
+		"Stats":   sc.stats,
+		"Terms":   sc.terms,
 		"HasCard": ok,
 		"Chat":    s.chatPanel(),
 	}
 	if ok {
-		data["Card"] = s.view(card, f)
+		data["Card"] = s.view(card, sc)
 	}
 
 	s.render(w, "drill.html", data)
@@ -415,7 +462,7 @@ func (s *Server) handleReveal(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	s.renderFragment(w, "card-back", s.view(card, filterFrom(r)))
+	s.renderFragment(w, "card-back", s.view(card, s.newDrillScope(filterFrom(r), s.now())))
 }
 
 func (s *Server) handleGrade(w http.ResponseWriter, r *http.Request) {
@@ -431,7 +478,11 @@ func (s *Server) handleGrade(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if _, err := s.store.Grade(id, review.Grade(g), s.now()); err != nil {
+	// The clock is read before the write and the snapshot built after it, so the
+	// counts the next fragment renders include the review just recorded.
+	now := s.now()
+
+	if _, err := s.store.Grade(id, review.Grade(g), now); err != nil {
 		// Persisting failed — say so rather than silently dropping the review, but
 		// keep the detail (which carries the store's paths) in the logs.
 		slog.Error("recording review", "card", id, "grade", g, "error", err)
@@ -440,7 +491,7 @@ func (s *Server) handleGrade(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	s.renderNext(w, filterFrom(r), id)
+	s.renderNext(w, s.newDrillScope(filterFrom(r), now), id)
 }
 
 // handlePick grades a recognition rep. The pick is objectively right or wrong,
@@ -458,12 +509,16 @@ func (s *Server) handlePick(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// One clock read for the whole request, taken first. A second read across
+	// midnight would re-seed the options between offering them and marking them.
+	now := s.now()
+
 	// The options are recomputed rather than trusted from the request, so a pick
 	// can only ever name something actually offered. They are captured before
 	// grading because grading moves the card, and with it the render mode: the
 	// answered rep keeps the options it was asked with so the result can mark the
 	// right one.
-	opts := s.choices(card)
+	opts := s.choices(card, now)
 	if len(opts) == 0 {
 		http.Error(w, "card "+id+" is not drilled by recognition", http.StatusBadRequest)
 		return
@@ -481,7 +536,7 @@ func (s *Server) handlePick(w http.ResponseWriter, r *http.Request) {
 		g = review.Good
 	}
 
-	if _, err := s.store.Grade(id, g, s.now()); err != nil {
+	if _, err := s.store.Grade(id, g, now); err != nil {
 		slog.Error("recording pick", "card", id, "pick", pick, "error", err)
 		http.Error(w, "could not record the review", http.StatusInternalServerError)
 
@@ -490,7 +545,7 @@ func (s *Server) handlePick(w http.ResponseWriter, r *http.Request) {
 
 	// Built after grading so the counts are the post-answer ones, then given back
 	// the options the question was actually asked with.
-	v := s.view(card, filterFrom(r))
+	v := s.view(card, s.newDrillScope(filterFrom(r), now))
 	v.Choices, v.Picked = opts, pick
 
 	s.renderFragment(w, "card-picked", v)
@@ -505,30 +560,35 @@ func (s *Server) handleAdvance(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	s.renderNext(w, filterFrom(r), id)
+	s.renderNext(w, s.newDrillScope(filterFrom(r), s.now()), id)
 }
 
 // renderNext serves whatever comes after an answered card: the next card's
 // front, or the done fragment when the scope is exhausted. exclude is the card
 // just answered, which only cram mode can otherwise hand straight back.
-func (s *Server) renderNext(w http.ResponseWriter, f filter, exclude string) {
-	card, ok := s.next(f, exclude)
+func (s *Server) renderNext(w http.ResponseWriter, sc drillScope, exclude string) {
+	card, ok := s.next(sc, exclude)
 	if !ok {
-		cards, terms := s.scope(f)
 		s.renderFragment(w, "card-done", map[string]any{
-			"Filter": f,
-			"Stats":  s.store.Stats(cards, s.now()),
-			"Terms":  terms,
+			"Filter": sc.filter,
+			"Stats":  sc.stats,
+			"Terms":  sc.terms,
 		})
 
 		return
 	}
 
-	s.renderFragment(w, "card-front", s.view(card, f))
+	s.renderFragment(w, "card-front", s.view(card, sc))
 }
 
 // checkpointView is one module's checkpoint prepared for rendering: its status
 // line, and the card being sat if a session is in progress.
+//
+// The status is handed in rather than read here, because every handler that
+// builds this view has already read one — to decide whether to offer a sitting,
+// or to see what grading the last answer did to the attempt. Status.Module is
+// the module identity for the whole view: it names the deck's canonical
+// spelling, and every action URL and store lookup below is built from it.
 type checkpointView struct {
 	Status  review.CheckpointStatus
 	HasCard bool
@@ -556,9 +616,15 @@ func (v checkpointView) GradeURL(g int) template.URL {
 	return v.URL("grade") + template.URL("&g="+strconv.Itoa(g))
 }
 
-// checkpointCards resolves the module in the query to its exam. A module with no
+// checkpointCards resolves the module in the query to its exam, returning the
+// deck's own spelling of the module rather than the query's. A module with no
 // checkpoint cards is a 404 rather than an empty page: there is nothing to sit,
 // and an empty exam that "passes" would be a silently useless gate.
+//
+// The card's own Checkpoint field is the deck's spelling; the query's is
+// whatever the caller typed, and Checkpoints matched it case-insensitively.
+// Returning the former is what keeps the store's attempt key, the index and
+// the drill's withholding gate all naming the same module.
 func (s *Server) checkpointCards(w http.ResponseWriter, r *http.Request) (string, []deck.Card, bool) {
 	module := r.URL.Query().Get("module")
 
@@ -568,16 +634,16 @@ func (s *Server) checkpointCards(w http.ResponseWriter, r *http.Request) (string
 		return "", nil, false
 	}
 
-	return module, cards, true
+	return cards[0].Checkpoint, cards, true
 }
 
-func (s *Server) checkpointView(module string, cards []deck.Card) checkpointView {
+func (s *Server) checkpointView(cards []deck.Card, status review.CheckpointStatus) checkpointView {
 	v := checkpointView{
-		Status: s.store.CheckpointStatus(module, cards, s.now()),
+		Status: status,
 		Total:  len(cards),
 	}
 
-	card, ok := s.store.NextCheckpoint(module, cards)
+	card, ok := s.store.NextCheckpoint(status.Module, cards)
 	if !ok {
 		v.Answered = v.Total
 		return v
@@ -607,10 +673,13 @@ func (s *Server) handleCheckpoint(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	now := s.now()
+
 	// Availability is queryable state, so the route decides from it rather than
 	// provoking the store's sentinel.
-	if s.store.CheckpointStatus(module, cards, s.now()).Available() {
-		if err := s.store.StartCheckpoint(module, cards, s.now()); err != nil {
+	status := s.store.CheckpointStatus(module, cards, now)
+	if status.Available() {
+		if err := s.store.StartCheckpoint(module, cards, now); err != nil {
 			slog.Error("starting checkpoint", "module", module, "error", err)
 			http.Error(w, "could not start the checkpoint", http.StatusInternalServerError)
 
@@ -618,7 +687,10 @@ func (s *Server) handleCheckpoint(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	s.render(w, "checkpoint.html", s.checkpointView(module, cards))
+	// Starting an attempt cannot change the status: StartCheckpoint writes one
+	// with Done and Failed false, which still reads as ready. So the status read
+	// above is the one the page renders, and no second read is needed.
+	s.render(w, "checkpoint.html", s.checkpointView(cards, status))
 }
 
 func (s *Server) handleCheckpointReveal(w http.ResponseWriter, r *http.Request) {
@@ -634,7 +706,7 @@ func (s *Server) handleCheckpointReveal(w http.ResponseWriter, r *http.Request) 
 			continue
 		}
 
-		v := s.checkpointView(module, cards)
+		v := s.checkpointView(cards, s.store.CheckpointStatus(module, cards, s.now()))
 		v.HasCard = true
 		v.Card = c
 		v.Q, v.A, v.ECS = s.markdown(c.Q), s.markdown(c.A), s.markdown(c.ECS)
@@ -666,7 +738,9 @@ func (s *Server) handleCheckpointGrade(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	switch err := s.store.GradeCheckpoint(module, id, review.Grade(g), cards, s.now()); {
+	now := s.now()
+
+	switch err := s.store.GradeCheckpoint(module, id, review.Grade(g), cards, now); {
 	case errors.Is(err, review.ErrCheckpointUnavailable):
 		// No attempt is open — a stale tab, or a hand-crafted request against a
 		// locked or already-passed checkpoint.
@@ -680,7 +754,9 @@ func (s *Server) handleCheckpointGrade(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	v := s.checkpointView(module, cards)
+	// Read after grading, not before: the answer just recorded may have failed the
+	// attempt or completed it, and the status line has to say so.
+	v := s.checkpointView(cards, s.store.CheckpointStatus(module, cards, now))
 	if v.HasCard {
 		s.renderFragment(w, "checkpoint-front", v)
 		return
