@@ -259,12 +259,12 @@ type cardText struct {
 	ECSComparison *ecsComparisonView
 }
 
-func (s *Server) cardText(c deck.Card) cardText {
+func (s *Server) newCardText(c deck.Card) cardText {
 	return cardText{
 		Q:             s.markdown(c.Q),
 		A:             s.markdown(c.A),
 		ECS:           s.markdown(c.ECS),
-		ECSComparison: s.ecsComparisonView(c.ECSComparison),
+		ECSComparison: s.newECSComparisonView(c.ECSComparison),
 	}
 }
 
@@ -354,7 +354,7 @@ func (v cardView) sep() string {
 func (s *Server) view(c deck.Card, sc drillScope) cardView {
 	return cardView{
 		Card:     c,
-		cardText: s.cardText(c),
+		cardText: s.newCardText(c),
 		Filter:   sc.filter,
 		Stats:    sc.stats,
 		Terms:    sc.terms,
@@ -362,7 +362,7 @@ func (s *Server) view(c deck.Card, sc drillScope) cardView {
 	}
 }
 
-func (s *Server) ecsComparisonView(comparison *deck.ECSComparison) *ecsComparisonView {
+func (s *Server) newECSComparisonView(comparison *deck.ECSComparison) *ecsComparisonView {
 	if comparison == nil {
 		return nil
 	}
@@ -706,7 +706,7 @@ func (s *Server) checkpointView(cards []deck.Card, status review.CheckpointStatu
 
 	v.HasCard = true
 	v.Card = card
-	v.cardText = s.cardText(card)
+	v.cardText = s.newCardText(card)
 
 	for i, c := range cards {
 		if c.ID == card.ID {
@@ -762,7 +762,7 @@ func (s *Server) handleCheckpointReveal(w http.ResponseWriter, r *http.Request) 
 		v := s.checkpointView(cards, s.store.CheckpointStatus(module, cards, s.now()))
 		v.HasCard = true
 		v.Card = c
-		v.cardText = s.cardText(c)
+		v.cardText = s.newCardText(c)
 
 		s.renderFragment(w, "checkpoint-back", v)
 
@@ -824,7 +824,7 @@ func (s *Server) handleBrowse(w http.ResponseWriter, r *http.Request) {
 
 	views := make([]cardView, 0, len(cards))
 	for _, c := range cards {
-		views = append(views, cardView{Card: c, cardText: s.cardText(c)})
+		views = append(views, cardView{Card: c, cardText: s.newCardText(c)})
 	}
 
 	s.render(w, "browse.html", map[string]any{"Cards": views, "Filter": f})

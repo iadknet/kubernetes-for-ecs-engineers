@@ -244,7 +244,7 @@ the service's existing request logging is unchanged.
 
 ## Implementation Phases
 
-### Phase 1: Establish the voice and paired format — 🚧 IN PROGRESS
+### Phase 1: Establish the voice and paired format — ✅ COMPLETE
 
 **Objective**: Validate concise prose anchors and both paired-comparison
 triggers — an object split and a dense field alignment — before applying the
@@ -268,9 +268,9 @@ pattern deck-wide.
 - [x] Add the dense-field pilot to `m1-rolling-update-knobs`, aligning ECS
       `deploymentConfiguration` against `strategy.rollingUpdate`.
 - [x] Dry-run both pilots' Kubernetes excerpts against the KIND cluster.
-- [ ] Review both pilots with the learner against the rubric and revise the
+- [x] Review both pilots with the learner against the rubric and revise the
       pattern if needed.
-- [ ] Run deck validation and sync this spec and `AUDIT.tsv` with the accepted
+- [x] Run deck validation and sync this spec and `AUDIT.tsv` with the accepted
       pilots.
 
 **Deliverables**:
@@ -441,7 +441,7 @@ not enable raw HTML in Markdown to obtain the two-column layout.
 
 ## Success Criteria
 
-- [ ] The learner accepts the M0 prose pilot and both M1 paired-configuration
+- [x] The learner accepts the M0 prose pilot and both M1 paired-configuration
       pilots as materially more useful under the five-question rubric.
 - [ ] Every card in decks 01, 02, and 11 is recorded exactly once in
       `AUDIT.tsv`, and both audit commands produce no output.
