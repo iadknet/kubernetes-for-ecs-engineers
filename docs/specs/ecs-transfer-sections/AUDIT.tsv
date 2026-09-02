@@ -1,51 +1,51 @@
 card_id	deck	disposition	rationale	source	lens
-m0-control-plane-components	01-foundations	pending			
-m0-only-apiserver-touches-etcd	01-foundations	pending			
+m0-control-plane-components	01-foundations	keep	Existing anchor is accurate and concise: ECS hides the same four components; here they run as readable workloads.		
+m0-only-apiserver-touches-etcd	01-foundations	add	Real transfer: the AWS API gated by IAM is the single front door, mapping to kube-apiserver gated by RBAC.		
 m0-kubelet-is-the-thing-that-acts	01-foundations	rewrite	Pilot: direct node-agent role with the API boundary and node-first incident consequence.	https://docs.aws.amazon.com/AmazonECS/latest/developerguide/ECS_agent.html https://kubernetes.io/docs/reference/command-line-tools-reference/kubelet/	
 m0-reconciliation-loop	01-foundations	rewrite	Pilot: desired-count maintenance is only a hook; the general extensible control-loop model has no ECS equivalent.	https://docs.aws.amazon.com/AmazonECS/latest/developerguide/ecs_services.html https://kubernetes.io/docs/concepts/architecture/controller/	
-m0-declarative-vs-imperative	01-foundations	pending			
-m0-object-shape	01-foundations	pending			
-m0-nodes-are-visible-here	01-foundations	pending			
+m0-declarative-vs-imperative	01-foundations	keep	Accurate direct-ish mapping: imperative kubectl vs apply over version-controlled YAML like ECS through IaC.		
+m0-object-shape	01-foundations	keep	Accurate no-equivalent boundary: task-definition JSON has no spec/status split.		
+m0-nodes-are-visible-here	01-foundations	keep	Accurate EC2-vs-Fargate visibility hook with an incident consequence.		
 m0-kubeconfig-context	01-foundations	rewrite	Pilot: profile and region are a partial hook because context also selects cluster endpoint and namespace.	https://docs.aws.amazon.com/cli/latest/userguide/cli-configure-profiles.html https://kubernetes.io/docs/concepts/configuration/organize-cluster-access-kubeconfig/	
-m0-what-a-namespace-does-not-isolate	01-foundations	pending			
-m0-labels-vs-annotations	01-foundations	pending			
-m0-label-selector	01-foundations	pending			
-m0-namespaced-vs-cluster-scoped	01-foundations	pending			
-m0-kube-system	01-foundations	pending			
-m0-service-dns-name	01-foundations	pending			
-m0-kube-proxy-has-no-health-checks	01-foundations	pending			
-m0-flat-network-model	01-foundations	pending			
-m0-why-multi-node	01-foundations	pending			
-m0-kind-image-loading	01-foundations	pending			
-m0-describe-vs-get	01-foundations	pending			
-m0-events-are-ephemeral	01-foundations	pending			
-m0-api-groups	01-foundations	pending			
-m0-kubectl-explain	01-foundations	pending			
-m0-checkpoint-machine-roles	01-foundations	pending			
-m0-checkpoint-wrong-cluster	01-foundations	pending			
-m1-pod	02-core-workloads	pending			
-m1-pods-are-cattle	02-core-workloads	pending			
+m0-what-a-namespace-does-not-isolate	01-foundations	keep	Accurate no-equivalent boundary; heads off the tenancy-boundary misconception.		
+m0-labels-vs-annotations	01-foundations	keep	Accurate: ECS tags are descriptive like annotations; nothing wires two resources together by tag.		
+m0-label-selector	01-foundations	keep	Accurate: explicit target-group registration vs implicit label binding, with the silent-failure consequence.		
+m0-namespaced-vs-cluster-scoped	01-foundations	not-useful	Kubernetes API-model fact with no ECS scope analog; an analogy here would be filler.		
+m0-kube-system	01-foundations	keep	Accurate: invisible AWS machinery vs readable in-cluster workloads; placement-debug consequence.		
+m0-service-dns-name	01-foundations	rewrite	Old text framed cluster DNS as closer to Service Connect; both Cloud Map and Service Connect require per-service opt-in and a namespace, while cluster DNS is automatic.	https://docs.aws.amazon.com/AmazonECS/latest/developerguide/create-service-connect.html https://kubernetes.io/docs/concepts/services-networking/dns-pod-service/	
+m0-kube-proxy-has-no-health-checks	01-foundations	keep	Accurate: ALB/NLB health checks vs in-kernel balancing whose only dial is readiness.		
+m0-flat-network-model	01-foundations	keep	Accurate awsvpc/EKS VPC CNI hook; the ENI/IP density cap is an AWS detail, not part of the model.	https://docs.aws.amazon.com/eks/latest/userguide/cni-increase-ip-addresses.html	
+m0-why-multi-node	01-foundations	keep	Accurate single-node-cluster analogy with a production-realism consequence.		
+m0-kind-image-loading	01-foundations	not-useful	KIND-local tooling gotcha; ECS always pulls from a registry, so there is no real transfer.		
+m0-describe-vs-get	01-foundations	keep	Accurate ECS-console Events-tab hook; same debugging instinct, different command.		
+m0-events-are-ephemeral	01-foundations	add	Real transfer: ECS service events are also a short rolling window (last ~100 / ~1h), not a durable log; forward to CloudWatch.	https://docs.aws.amazon.com/AmazonECS/latest/developerguide/task-lifecycle-events.html	
+m0-api-groups	01-foundations	add	Real genuinely-new note: AWS rarely removes API versions; Kubernetes removes them on schedule (extensions/v1beta1 Ingress at 1.22), breaking manifests on upgrade.	https://kubernetes.io/blog/2021/07/14/upcoming-changes-in-kubernetes-1-22/	
+m0-kubectl-explain	01-foundations	not-useful	Kubernetes tooling affordance (live OpenAPI schema); no ECS equivalent to anchor to.		
+m0-checkpoint-machine-roles	01-foundations	keep	Accurate: ECS hides every component; the split gives 'won't start' an addressable owner.		
+m0-checkpoint-wrong-cluster	01-foundations	keep	Accurate: AWS profile+region parallel; use-context maps to export AWS_PROFILE; same paranoia.		
+m1-pod	02-core-workloads	keep	Accurate: Pod maps to an ECS Task; multi-container task definition maps to a multi-container Pod, including awsvpc shared localhost.		
+m1-pods-are-cattle	02-core-workloads	keep	Accurate: don't run-task long-running work; create a Service so something maintains the desired count.		
 m1-service-collision	02-core-workloads	paired-comparison	Pilot: one ECS Service outcome splits across a Deployment and a Kubernetes Service.	https://docs.aws.amazon.com/AmazonECS/latest/APIReference/API_CreateService.html https://kubernetes.io/docs/concepts/services-networking/service/	
-m1-deployment-replicaset-pod	02-core-workloads	pending			
-m1-service-types	02-core-workloads	pending			
-m1-headless-service	02-core-workloads	pending			
-m1-grpc-l4-gotcha	02-core-workloads	pending			
-m1-endpointslice	02-core-workloads	pending			
-m1-zero-endpoints	02-core-workloads	pending			
+m1-deployment-replicaset-pod	02-core-workloads	keep	Accurate: ECS collapses this into Service + task-definition revisions; the ReplicaSet is the layer ECS does not expose.		
+m1-service-types	02-core-workloads	rewrite	Old text said type LoadBalancer equals an NLB; the default is a Classic Load Balancer from the in-tree provider, NLB only with the AWS Load Balancer Controller (v2.5+).	https://aws.github.io/aws-eks-best-practices/networking/loadbalancing/loadbalancing/ https://docs.aws.amazon.com/eks/latest/userguide/auto-configure-nlb.html	
+m1-headless-service	02-core-workloads	add	Real transfer: Cloud Map in awsvpc mode publishes an A record per task, returning individual task IPs like a headless Service returns Pod IPs.	https://docs.aws.amazon.com/AmazonECS/latest/developerguide/service-discovery.html	
+m1-grpc-l4-gotcha	02-core-workloads	keep	Accurate: identical L4 (NLB) gRPC connection-pinning failure mode.		
+m1-endpointslice	02-core-workloads	not-useful	The target-group / readiness-gates-membership transfer is already anchored in m0-label-selector and m0-kube-proxy; repeating it would violate the no-repetition objective.		
+m1-zero-endpoints	02-core-workloads	not-useful	The silent zero-endpoints transfer is already carried by m0-label-selector; a second target-group analogy would repeat.		
 m1-rolling-update-knobs	02-core-workloads	paired-comparison	Pilot: align lower availability and upper surge bounds while preserving their inverse semantics and rounding differences.	https://docs.aws.amazon.com/AmazonECS/latest/developerguide/deployment-type-ecs.html https://kubernetes.io/docs/concepts/workloads/controllers/deployment/	
-m1-rollout-commands	02-core-workloads	pending			
-m1-rollout-restart-mechanism	02-core-workloads	pending			
-m1-imagepullpolicy-latest	02-core-workloads	pending			
-m1-daemonset	02-core-workloads	pending			
-m1-statefulset	02-core-workloads	pending			
-m1-job-cronjob	02-core-workloads	pending			
-m1-init-vs-sidecar	02-core-workloads	pending			
-m1-pod-phases	02-core-workloads	pending			
-m1-crashloopbackoff	02-core-workloads	pending			
-m1-restart-policy	02-core-workloads	pending			
-m1-port-forward	02-core-workloads	pending			
-m1-kind-load-image	02-core-workloads	pending			
-m1-what-m1-is-missing	02-core-workloads	pending			
+m1-rollout-commands	02-core-workloads	keep	Accurate command mappings (rollout restart to force-new-deployment; rollout undo to a prior task-definition revision) with the built-in-vs-scripted boundary.		
+m1-rollout-restart-mechanism	02-core-workloads	not-useful	The force-new-deployment analogy already lives in m1-rollout-commands; the annotation-to-hash-to-new-ReplicaSet mechanism is Kubernetes-internal with no ECS parallel.		
+m1-imagepullpolicy-latest	02-core-workloads	rewrite	Old text ('ECS pins per task-definition revision') predates versionConsistency, which now resolves a mutable tag to a digest per deployment by default; Kubernetes does not.	https://docs.aws.amazon.com/AmazonECS/latest/developerguide/pull-behavior.html https://repost.aws/knowledge-center/ecs-latest-image-digest	
+m1-daemonset	02-core-workloads	keep	Accurate: ECS daemon scheduling strategy is a direct equivalent; EKS Fargate does not support DaemonSets (one Pod per Fargate node).	https://docs.aws.amazon.com/eks/latest/userguide/fargate.html	
+m1-statefulset	02-core-workloads	keep	Accurate no-equivalent boundary: ECS tasks are interchangeable and anonymous.		
+m1-job-cronjob	02-core-workloads	keep	Accurate: Job maps to run-task, CronJob to an EventBridge scheduled rule; both are first-class objects here.		
+m1-init-vs-sidecar	02-core-workloads	keep	Accurate: sidecars map to a multi-container task definition with dependsOn; init containers are cleaner than the dependsOn COMPLETE dance.		
+m1-pod-phases	02-core-workloads	add	Real transfer: ECS task states (PROVISIONING/PENDING) hide 'why not running yet' the way the Pending phase does.	https://repost.aws/knowledge-center/ecs-task-stuck-lifecycle-state	
+m1-crashloopbackoff	02-core-workloads	keep	Accurate: the ECS task restart loop; --previous is a better debugging affordance than digging for stopped-task logs.		
+m1-restart-policy	02-core-workloads	add	Real genuinely-new note: ECS has no in-place container restart; a dead essential container replaces the whole task, possibly on another instance.	https://kubernetes.io/docs/concepts/workloads/pods/pod-lifecycle/#restart-policy	
+m1-port-forward	02-core-workloads	keep	Accurate: ECS Exec / SSM port forwarding; same break-glass role and same reason it is not user-facing.		
+m1-kind-load-image	02-core-workloads	not-useful	KIND-local tooling gotcha; ECS always pulls from a registry, so there is no real transfer (consistent with m0-kind-image-loading).		
+m1-what-m1-is-missing	02-core-workloads	add	Real reframe: ECS bundled probes / minimum-healthy-percent / Service Auto Scaling into the service and its ALB; Kubernetes unbundles them into separate objects you add deliberately.	https://docs.aws.amazon.com/AmazonECS/latest/developerguide/service-auto-scaling.html	
 eks-what-aws-manages	11-eks-and-aws	pending			eks-specific
 eks-vpc-cni-ip-exhaustion	11-eks-and-aws	pending			eks-specific
 eks-prefix-delegation	11-eks-and-aws	pending			eks-specific

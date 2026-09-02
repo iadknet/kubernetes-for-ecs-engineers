@@ -1,6 +1,6 @@
 # ECS Transfer Deck Rollout — Technical Spec
 
-**Status**: ⏳ PLANNED
+**Status**: 🚧 IN PROGRESS
 **Last updated**: 2026-09-02
 
 ## Overview
@@ -83,25 +83,28 @@ Not applicable. No runtime signals change.
 
 ## Implementation Phases
 
-### Phase 1: Complete the M0 and M1 decks — ⏳ PLANNED
+### Phase 1: Complete the M0 and M1 decks — ✅ COMPLETE
 
 **Objective**: Apply the accepted pattern across both reachable module decks
 without manufacturing weak analogies.
 
 **Tasks**:
 
-- [ ] Audit all 24 cards in `01-foundations.yaml` for accuracy, boundary,
+- [x] Audit all 24 cards in `01-foundations.yaml` for accuracy, boundary,
       consequence, and concision.
-- [ ] Audit all 23 cards in `02-core-workloads.yaml` on the same terms.
-- [ ] Add paired comparisons where the trigger applies, prioritizing rollouts,
-      routing, and workload ownership.
-- [ ] Add sections where ECS experience materially helps and leave neutral
+- [x] Audit all 23 cards in `02-core-workloads.yaml` on the same terms.
+- [x] Add paired comparisons where the trigger applies, prioritizing rollouts,
+      routing, and workload ownership. (The two shipped pilots already cover
+      rollouts and routing/ownership; no additional card met the trigger without
+      repeating them, so none were manufactured.)
+- [x] Add sections where ECS experience materially helps and leave neutral
       cards intentionally blank.
-- [ ] Verify provider- and version-sensitive claims against primary sources and
-      dry-run every new Kubernetes excerpt.
-- [ ] Record each card's disposition, rationale, and any required primary source
+- [x] Verify provider- and version-sensitive claims against primary sources and
+      dry-run every new Kubernetes excerpt. (No new excerpts were added; the two
+      pilot excerpts were re-confirmed against the live cluster.)
+- [x] Record each card's disposition, rationale, and any required primary source
       in `AUDIT.tsv`.
-- [ ] Run deck validation and sync this spec and `AUDIT.tsv`.
+- [x] Run deck validation and sync this spec and `AUDIT.tsv`.
 
 **Deliverables**:
 
