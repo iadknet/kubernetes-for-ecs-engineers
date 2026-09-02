@@ -50,8 +50,12 @@ This spec is content authoring against that pattern and adds no code.
 ## Technical Requirements
 
 The authoring contract is defined in the pattern spec's **Technical
-Requirements** and is unchanged. In brief, each edited section carries only what
-teaches the card:
+Requirements** and is unchanged. Two repository skills govern the work:
+`k8s-for-ecs-engineers` owns the teaching content — which mapping is direct,
+partial, split, or absent, and which caveats are required — and
+`clear-teaching-writing` owns the prose style of every edited section, keeping it
+plain and free of convoluted phrasing. In brief, each edited section carries
+only what teaches the card:
 
 1. the nearest ECS/Fargate operational hook;
 2. the mapping classification or analogy boundary; and
@@ -167,6 +171,9 @@ the following authoring-time gates run per phase:
   duplicating the tested answer? Is the section shorter than the answer it
   supports? Paired comparisons must additionally make the object split clear and
   not look production-complete.
+- Prose-style check: each edited section passes the `clear-teaching-writing`
+  self-review pass — plain language, no reflexive anti-tells, every technical
+  term and caveat preserved.
 
 ### TDD Exceptions
 
@@ -229,6 +236,8 @@ Not applicable.
   rendering this spec applies.
 - `docs/specs/ecs-transfer-sections/AUDIT.tsv` — the seeded 63-card inventory
   this spec drives to terminal dispositions.
+- `k8s-for-ecs-engineers` and `clear-teaching-writing` skills — the content and
+  prose-style contracts applied to every edited section.
 
 ## Risks and Mitigation
 
