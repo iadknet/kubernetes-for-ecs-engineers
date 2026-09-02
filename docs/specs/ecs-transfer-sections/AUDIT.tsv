@@ -1,0 +1,64 @@
+card_id	deck	disposition	rationale	source	lens
+m0-control-plane-components	01-foundations	pending			
+m0-only-apiserver-touches-etcd	01-foundations	pending			
+m0-kubelet-is-the-thing-that-acts	01-foundations	rewrite	Pilot: direct node-agent role with the API boundary and node-first incident consequence.	https://docs.aws.amazon.com/AmazonECS/latest/developerguide/ECS_agent.html https://kubernetes.io/docs/reference/command-line-tools-reference/kubelet/	
+m0-reconciliation-loop	01-foundations	rewrite	Pilot: desired-count maintenance is only a hook; the general extensible control-loop model has no ECS equivalent.	https://docs.aws.amazon.com/AmazonECS/latest/developerguide/ecs_services.html https://kubernetes.io/docs/concepts/architecture/controller/	
+m0-declarative-vs-imperative	01-foundations	pending			
+m0-object-shape	01-foundations	pending			
+m0-nodes-are-visible-here	01-foundations	pending			
+m0-kubeconfig-context	01-foundations	rewrite	Pilot: profile and region are a partial hook because context also selects cluster endpoint and namespace.	https://docs.aws.amazon.com/cli/latest/userguide/cli-configure-profiles.html https://kubernetes.io/docs/concepts/configuration/organize-cluster-access-kubeconfig/	
+m0-what-a-namespace-does-not-isolate	01-foundations	pending			
+m0-labels-vs-annotations	01-foundations	pending			
+m0-label-selector	01-foundations	pending			
+m0-namespaced-vs-cluster-scoped	01-foundations	pending			
+m0-kube-system	01-foundations	pending			
+m0-service-dns-name	01-foundations	pending			
+m0-kube-proxy-has-no-health-checks	01-foundations	pending			
+m0-flat-network-model	01-foundations	pending			
+m0-why-multi-node	01-foundations	pending			
+m0-kind-image-loading	01-foundations	pending			
+m0-describe-vs-get	01-foundations	pending			
+m0-events-are-ephemeral	01-foundations	pending			
+m0-api-groups	01-foundations	pending			
+m0-kubectl-explain	01-foundations	pending			
+m0-checkpoint-machine-roles	01-foundations	pending			
+m0-checkpoint-wrong-cluster	01-foundations	pending			
+m1-pod	02-core-workloads	pending			
+m1-pods-are-cattle	02-core-workloads	pending			
+m1-service-collision	02-core-workloads	paired-comparison	Pilot: one ECS Service outcome splits across a Deployment and a Kubernetes Service.	https://docs.aws.amazon.com/AmazonECS/latest/APIReference/API_CreateService.html https://kubernetes.io/docs/concepts/services-networking/service/	
+m1-deployment-replicaset-pod	02-core-workloads	pending			
+m1-service-types	02-core-workloads	pending			
+m1-headless-service	02-core-workloads	pending			
+m1-grpc-l4-gotcha	02-core-workloads	pending			
+m1-endpointslice	02-core-workloads	pending			
+m1-zero-endpoints	02-core-workloads	pending			
+m1-rolling-update-knobs	02-core-workloads	paired-comparison	Pilot: align lower availability and upper surge bounds while preserving their inverse semantics and rounding differences.	https://docs.aws.amazon.com/AmazonECS/latest/developerguide/deployment-type-ecs.html https://kubernetes.io/docs/concepts/workloads/controllers/deployment/	
+m1-rollout-commands	02-core-workloads	pending			
+m1-rollout-restart-mechanism	02-core-workloads	pending			
+m1-imagepullpolicy-latest	02-core-workloads	pending			
+m1-daemonset	02-core-workloads	pending			
+m1-statefulset	02-core-workloads	pending			
+m1-job-cronjob	02-core-workloads	pending			
+m1-init-vs-sidecar	02-core-workloads	pending			
+m1-pod-phases	02-core-workloads	pending			
+m1-crashloopbackoff	02-core-workloads	pending			
+m1-restart-policy	02-core-workloads	pending			
+m1-port-forward	02-core-workloads	pending			
+m1-kind-load-image	02-core-workloads	pending			
+m1-what-m1-is-missing	02-core-workloads	pending			
+eks-what-aws-manages	11-eks-and-aws	pending			eks-specific
+eks-vpc-cni-ip-exhaustion	11-eks-and-aws	pending			eks-specific
+eks-prefix-delegation	11-eks-and-aws	pending			eks-specific
+eks-irsa-vs-pod-identity	11-eks-and-aws	pending			eks-specific
+eks-two-authz-systems	11-eks-and-aws	pending			eks-specific
+eks-cluster-creator-admin	11-eks-and-aws	pending			eks-specific
+eks-lb-controller	11-eks-and-aws	pending			eks-specific
+eks-target-type-ip	11-eks-and-aws	pending			eks-specific
+eks-fargate-limits	11-eks-and-aws	pending			eks-specific
+eks-auto-mode	11-eks-and-aws	pending			eks-specific
+eks-karpenter	11-eks-and-aws	pending			eks-specific
+eks-ebs-single-az	11-eks-and-aws	pending			eks-specific
+eks-addons	11-eks-and-aws	pending			eks-specific
+eks-version-support	11-eks-and-aws	pending			eks-specific
+eks-upgrade-workload-impact	11-eks-and-aws	pending			eks-specific
+eks-portable-vs-aws	11-eks-and-aws	pending			portable

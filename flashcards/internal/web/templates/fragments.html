@@ -1,3 +1,43 @@
+{{define "ecs-transfer"}}
+{{if or .ECS .ECSComparison}}
+<div class="ecs">
+  <h4>Coming from ECS</h4>
+  {{with .ECS}}{{.}}{{end}}
+  {{with .ECSComparison}}
+  <div class="ecs-comparison">
+    <div class="ecs-comparison-scenario">{{.Scenario}}</div>
+    <div class="ecs-comparison-grid">
+      <section class="ecs-comparison-excerpt ecs-comparison-ecs">
+        <h5>ECS/Fargate JSON</h5>
+        <pre>{{.ECSJSON}}</pre>
+      </section>
+      <section class="ecs-comparison-excerpt ecs-comparison-kubernetes">
+        <h5>Kubernetes YAML</h5>
+        <pre>{{.KubernetesYAML}}</pre>
+      </section>
+    </div>
+    <div class="ecs-comparison-alignments">
+      <table>
+        <thead>
+          <tr><th>ECS/Fargate directive</th><th>Kubernetes directive</th><th>Mapping</th><th>Caveat</th></tr>
+        </thead>
+        <tbody>
+          {{range .Alignments}}
+          <tr><td>{{.ECS}}</td><td>{{.Kubernetes}}</td><td><span class="pill">{{.Mapping}}</span></td><td>{{.Caveat}}</td></tr>
+          {{end}}
+        </tbody>
+      </table>
+    </div>
+    <div class="ecs-comparison-notes">
+      <div><strong>Consequence</strong>{{.Consequence}}</div>
+      <div><strong>Omissions</strong>{{.Omissions}}</div>
+    </div>
+  </div>
+  {{end}}
+</div>
+{{end}}
+{{end}}
+
 {{define "card-front"}}
 <div id="card" class="card" data-card="{{.Card.ID}}">
   <div class="meta">{{with .Card.Module}}{{.}} · {{end}}{{.Card.Deck}}</div>
@@ -38,12 +78,7 @@
     </div>
     {{end}}
   </div>
-  {{with .ECS}}
-  <div class="ecs">
-    <h4>Coming from ECS</h4>
-    {{.}}
-  </div>
-  {{end}}
+  {{template "ecs-transfer" .}}
   <div class="grades">
     <button data-key="reveal" hx-post="{{.URL "advance"}}" hx-target="#card" hx-swap="outerHTML">
       Next card <b>space</b>
@@ -59,12 +94,7 @@
   <div class="meta">{{with .Card.Module}}{{.}} · {{end}}{{.Card.Deck}}</div>
   <div class="q">{{.Q}}</div>
   <div class="a">{{.A}}</div>
-  {{with .ECS}}
-  <div class="ecs">
-    <h4>Coming from ECS</h4>
-    {{.}}
-  </div>
-  {{end}}
+  {{template "ecs-transfer" .}}
   <div class="tags">
     {{range .Card.Tags}}<a href="/browse?tag={{.}}">{{.}}</a>{{end}}
   </div>

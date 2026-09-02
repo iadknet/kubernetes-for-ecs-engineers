@@ -55,6 +55,25 @@
   .ecs h4 { margin: 0 0 .35rem; font-size: .6875rem; text-transform: uppercase;
             letter-spacing: .08em; color: var(--muted); }
   .ecs > :last-child { margin-bottom: 0; }
+  .ecs-comparison { margin-top: .85rem; }
+  .ecs-comparison-scenario > :first-child { margin-top: 0; }
+  .ecs-comparison-scenario > :last-child { margin-bottom: .65rem; }
+  .ecs-comparison-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: .75rem; }
+  .ecs-comparison-excerpt { min-width: 0; }
+  .ecs-comparison-excerpt h5 { margin: 0 0 .25rem; font-size: .6875rem; text-transform: uppercase;
+                               letter-spacing: .06em; color: var(--muted); }
+  .ecs-comparison-excerpt pre { height: calc(100% - 1.35rem); margin: 0; background: var(--card); }
+  .ecs-comparison-alignments { margin-top: .85rem; overflow-x: auto; }
+  .ecs-comparison-alignments td { min-width: 8rem; vertical-align: top; }
+  .ecs-comparison-alignments td > :first-child { margin-top: 0; }
+  .ecs-comparison-alignments td > :last-child { margin-bottom: 0; }
+  .ecs-comparison-notes { margin-top: .75rem; display: grid; gap: .4rem; }
+  .ecs-comparison-notes strong { display: block; font-size: .6875rem; text-transform: uppercase;
+                                  letter-spacing: .06em; color: var(--muted); }
+  .ecs-comparison-notes p { margin: .1rem 0 0; }
+  @media (max-width: 48rem) {
+    .ecs-comparison-grid { grid-template-columns: minmax(0, 1fr); }
+  }
   .tags { margin-top: 1.25rem; display: flex; gap: .4rem; flex-wrap: wrap; }
   .tags a { font-size: .75rem; color: var(--muted); background: var(--code-bg);
             padding: .15rem .5rem; border-radius: 999px; text-decoration: none; }

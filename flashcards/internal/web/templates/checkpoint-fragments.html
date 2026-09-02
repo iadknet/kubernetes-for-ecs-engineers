@@ -16,12 +16,7 @@
   <div class="meta">{{.Status.Module}} checkpoint · question {{add .Answered 1}} of {{.Total}}</div>
   <div class="q">{{.Q}}</div>
   <div class="a">{{.A}}</div>
-  {{with .ECS}}
-  <div class="ecs">
-    <h4>Coming from ECS</h4>
-    {{.}}
-  </div>
-  {{end}}
+  {{template "ecs-transfer" .}}
   <div class="grades">
     <button class="g1" data-key="1" hx-post="{{.GradeURL 1}}" hx-target="#checkpoint" hx-swap="outerHTML">Again <b>1</b></button>
     <button class="g2" data-key="2" hx-post="{{.GradeURL 2}}" hx-target="#checkpoint" hx-swap="outerHTML">Hard <b>2</b></button>

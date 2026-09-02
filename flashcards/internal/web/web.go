@@ -225,10 +225,8 @@ func (s *Server) newDrillScope(f filter, now time.Time) drillScope {
 // scope's counts have to travel with the card. They are copied off the request's
 // drillScope rather than recomputed per card.
 type cardView struct {
-	Card   deck.Card
-	Q      template.HTML
-	A      template.HTML
-	ECS    template.HTML
+	Card deck.Card
+	cardText
 	Filter filter
 	Stats  review.Stats
 	Terms  int // prerequisite terms pulled into this scope
@@ -248,6 +246,42 @@ type choiceView struct {
 	A       template.HTML
 	Term    string
 	Correct bool
+}
+
+// cardText is one card's prose, markdown-converted and safe to emit. Every view
+// that renders a card embeds it rather than listing the fields itself: the
+// alternative is one assembly site per surface, where adding a field compiles
+// fine on the surfaces that forgot it and silently renders nothing there.
+type cardText struct {
+	Q             template.HTML
+	A             template.HTML
+	ECS           template.HTML
+	ECSComparison *ecsComparisonView
+}
+
+func (s *Server) cardText(c deck.Card) cardText {
+	return cardText{
+		Q:             s.markdown(c.Q),
+		A:             s.markdown(c.A),
+		ECS:           s.markdown(c.ECS),
+		ECSComparison: s.ecsComparisonView(c.ECSComparison),
+	}
+}
+
+type ecsComparisonView struct {
+	Scenario       template.HTML
+	ECSJSON        string
+	KubernetesYAML string
+	Alignments     []ecsAlignmentView
+	Consequence    template.HTML
+	Omissions      template.HTML
+}
+
+type ecsAlignmentView struct {
+	ECS        template.HTML
+	Kubernetes template.HTML
+	Mapping    string
+	Caveat     template.HTML
 }
 
 // IsMultipleChoice reports whether this rep is graded by recognition.
@@ -319,14 +353,37 @@ func (v cardView) sep() string {
 
 func (s *Server) view(c deck.Card, sc drillScope) cardView {
 	return cardView{
-		Card:    c,
-		Q:       s.markdown(c.Q),
-		A:       s.markdown(c.A),
-		ECS:     s.markdown(c.ECS),
-		Filter:  sc.filter,
-		Stats:   sc.stats,
-		Terms:   sc.terms,
-		Choices: s.choices(c, sc.now),
+		Card:     c,
+		cardText: s.cardText(c),
+		Filter:   sc.filter,
+		Stats:    sc.stats,
+		Terms:    sc.terms,
+		Choices:  s.choices(c, sc.now),
+	}
+}
+
+func (s *Server) ecsComparisonView(comparison *deck.ECSComparison) *ecsComparisonView {
+	if comparison == nil {
+		return nil
+	}
+
+	alignments := make([]ecsAlignmentView, 0, len(comparison.Alignments))
+	for _, alignment := range comparison.Alignments {
+		alignments = append(alignments, ecsAlignmentView{
+			ECS:        s.markdown(alignment.ECS),
+			Kubernetes: s.markdown(alignment.Kubernetes),
+			Mapping:    alignment.Mapping,
+			Caveat:     s.markdown(alignment.Caveat),
+		})
+	}
+
+	return &ecsComparisonView{
+		Scenario:       s.markdown(comparison.Scenario),
+		ECSJSON:        comparison.ECSJSON,
+		KubernetesYAML: comparison.KubernetesYAML,
+		Alignments:     alignments,
+		Consequence:    s.markdown(comparison.Consequence),
+		Omissions:      s.markdown(comparison.Omissions),
 	}
 }
 
@@ -593,9 +650,7 @@ type checkpointView struct {
 	Status  review.CheckpointStatus
 	HasCard bool
 	Card    deck.Card
-	Q       template.HTML
-	A       template.HTML
-	ECS     template.HTML
+	cardText
 	// Answered and Total track progress through the sitting, so a checkpoint
 	// shows how much of the exam is left rather than an open-ended queue.
 	Answered int
@@ -651,9 +706,7 @@ func (s *Server) checkpointView(cards []deck.Card, status review.CheckpointStatu
 
 	v.HasCard = true
 	v.Card = card
-	v.Q = s.markdown(card.Q)
-	v.A = s.markdown(card.A)
-	v.ECS = s.markdown(card.ECS)
+	v.cardText = s.cardText(card)
 
 	for i, c := range cards {
 		if c.ID == card.ID {
@@ -709,7 +762,7 @@ func (s *Server) handleCheckpointReveal(w http.ResponseWriter, r *http.Request) 
 		v := s.checkpointView(cards, s.store.CheckpointStatus(module, cards, s.now()))
 		v.HasCard = true
 		v.Card = c
-		v.Q, v.A, v.ECS = s.markdown(c.Q), s.markdown(c.A), s.markdown(c.ECS)
+		v.cardText = s.cardText(c)
 
 		s.renderFragment(w, "checkpoint-back", v)
 
@@ -771,12 +824,7 @@ func (s *Server) handleBrowse(w http.ResponseWriter, r *http.Request) {
 
 	views := make([]cardView, 0, len(cards))
 	for _, c := range cards {
-		views = append(views, cardView{
-			Card: c,
-			Q:    s.markdown(c.Q),
-			A:    s.markdown(c.A),
-			ECS:  s.markdown(c.ECS),
-		})
+		views = append(views, cardView{Card: c, cardText: s.cardText(c)})
 	}
 
 	s.render(w, "browse.html", map[string]any{"Cards": views, "Filter": f})
