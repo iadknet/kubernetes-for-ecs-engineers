@@ -1,6 +1,6 @@
 # Clear Teaching Writing Skill — Technical Spec
 
-**Status**: ⏳ PLANNED
+**Status**: ✅ COMPLETE
 **Last updated**: 2026-09-02
 
 ## Overview
@@ -88,19 +88,19 @@ Not applicable.
 
 ## Implementation Phases
 
-### Phase 1: Author and wire the skill — ⏳ PLANNED
+### Phase 1: Author and wire the skill — ✅ COMPLETE
 
 **Objective**: Ship the skill package.
 
 **Tasks**:
 
-- [ ] Draft `.agents/skills/clear-teaching-writing/SKILL.md` covering the six
+- [x] Draft `.agents/skills/clear-teaching-writing/SKILL.md` covering the six
       required sections, distilling the sources in **Dependencies** and citing
       them.
-- [ ] Build the before → after examples in the anti-tells checklist from real
+- [x] Build the before → after examples in the anti-tells checklist from real
       convoluted phrasings, each fix preserving the technical content.
-- [ ] Add the `.claude/skills/clear-teaching-writing` compatibility symlink.
-- [ ] Add a one-line companion cross-reference to `clear-teaching-writing` in
+- [x] Add the `.claude/skills/clear-teaching-writing` compatibility symlink.
+- [x] Add a one-line companion cross-reference to `clear-teaching-writing` in
       `.agents/skills/k8s-for-ecs-engineers/SKILL.md` so the content skill points
       to the style skill.
 
@@ -137,12 +137,12 @@ is nothing to unit test or dry-run. The gate is a human reading the finished
 
 ## Success Criteria
 
-- [ ] `.agents/skills/clear-teaching-writing/SKILL.md` exists with all six
+- [x] `.agents/skills/clear-teaching-writing/SKILL.md` exists with all six
       required sections and cited sources.
-- [ ] `.claude/skills/clear-teaching-writing` resolves to the canonical
+- [x] `.claude/skills/clear-teaching-writing` resolves to the canonical
       directory.
-- [ ] `k8s-for-ecs-engineers/SKILL.md` carries the companion cross-reference.
-- [ ] The author accepts the finished guidance as clear, correctly scoped, and
+- [x] `k8s-for-ecs-engineers/SKILL.md` carries the companion cross-reference.
+- [x] The author accepts the finished guidance as clear, correctly scoped, and
       within its boundaries.
 
 ## Troubleshooting Guide
