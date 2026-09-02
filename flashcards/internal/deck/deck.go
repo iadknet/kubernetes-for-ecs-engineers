@@ -2,15 +2,51 @@
 package deck
 
 import (
+	"encoding/json"
+	"errors"
 	"fmt"
+	"io"
 	"io/fs"
 	"os"
 	"path"
 	"sort"
 	"strings"
 
+	yamlv3 "go.yaml.in/yaml/v3"
 	"sigs.k8s.io/yaml"
 )
+
+const (
+	maxComparisonExcerptLines = 25
+	minComparisonAlignments   = 2
+	maxComparisonAlignments   = 4
+)
+
+var ecsMappingClasses = map[string]struct{}{
+	"direct":        {},
+	"partial":       {},
+	"split":         {},
+	"no-equivalent": {},
+}
+
+// ECSComparison is optional post-answer context that aligns an ECS/Fargate
+// configuration excerpt with one or more Kubernetes objects.
+type ECSComparison struct {
+	Scenario       string         `json:"scenario"`
+	ECSJSON        string         `json:"ecs_json"`
+	KubernetesYAML string         `json:"kubernetes_yaml"`
+	Alignments     []ECSAlignment `json:"alignments"`
+	Consequence    string         `json:"consequence"`
+	Omissions      string         `json:"omissions"`
+}
+
+// ECSAlignment classifies one ECS-to-Kubernetes directive pair.
+type ECSAlignment struct {
+	ECS        string `json:"ecs"`
+	Kubernetes string `json:"kubernetes"`
+	Mapping    string `json:"mapping"`
+	Caveat     string `json:"caveat"`
+}
 
 // Card is one flashcard. The ECS field carries the analogy to AWS ECS/Fargate
 // and is deliberately empty for concepts that have no ECS equivalent.
@@ -19,13 +55,14 @@ import (
 // library that teaches that term. Terms and aliases are matched case
 // sensitively, so a card may claim "KIND" without also claiming "kind".
 type Card struct {
-	ID      string   `json:"id"`
-	Q       string   `json:"q"`
-	A       string   `json:"a"`
-	ECS     string   `json:"ecs"`
-	Tags    []string `json:"tags"`
-	Term    string   `json:"term"`
-	Aliases []string `json:"aliases"`
+	ID            string         `json:"id"`
+	Q             string         `json:"q"`
+	A             string         `json:"a"`
+	ECS           string         `json:"ecs"`
+	ECSComparison *ECSComparison `json:"ecs_comparison"`
+	Tags          []string       `json:"tags"`
+	Term          string         `json:"term"`
+	Aliases       []string       `json:"aliases"`
 
 	// Distractors overrides the wrong options a glossary card is drilled against
 	// while it is still being recognised, naming other glossary cards by id. It
@@ -273,7 +310,170 @@ func validateCard(c *Card, filename string, i int) error {
 		return fmt.Errorf("%s: card %q cannot be both a glossary card and a checkpoint card", filename, c.ID)
 	}
 
+	if c.ECSComparison != nil {
+		if err := validateECSComparison(c.ECSComparison); err != nil {
+			return fmt.Errorf("%s: card %q ecs_comparison: %w", filename, c.ID, err)
+		}
+	}
+
 	return nil
+}
+
+func validateECSComparison(comparison *ECSComparison) error {
+	if err := validateECSComparisonFields(comparison); err != nil {
+		return err
+	}
+
+	if err := validateECSComparisonExcerpts(comparison); err != nil {
+		return err
+	}
+
+	return validateECSAlignments(comparison.Alignments)
+}
+
+func validateECSComparisonFields(comparison *ECSComparison) error {
+	return validateRequiredFields(
+		requiredField{name: "scenario", value: comparison.Scenario},
+		requiredField{name: "ecs_json", value: comparison.ECSJSON},
+		requiredField{name: "kubernetes_yaml", value: comparison.KubernetesYAML},
+		requiredField{name: "consequence", value: comparison.Consequence},
+		requiredField{name: "omissions", value: comparison.Omissions},
+	)
+}
+
+// validateECSComparisonExcerpts prefixes each excerpt error with the deck key
+// that carries it, so the inner checks read as verb phrases about that field.
+func validateECSComparisonExcerpts(comparison *ECSComparison) error {
+	if err := validateJSONObject(comparison.ECSJSON); err != nil {
+		return fmt.Errorf("ecs_json %w", err)
+	}
+
+	if err := validateKubernetesDocuments(comparison.KubernetesYAML); err != nil {
+		return fmt.Errorf("kubernetes_yaml %w", err)
+	}
+
+	return nil
+}
+
+// validateJSONObject checks one ECS excerpt is a non-empty JSON object within
+// the size ceiling. Syntax alone is not enough: json.Valid accepts a bare
+// scalar such as `3`, which parses but is not a configuration excerpt.
+func validateJSONObject(value string) error {
+	if lineCount(value) > maxComparisonExcerptLines {
+		return fmt.Errorf("exceeds %d lines", maxComparisonExcerptLines)
+	}
+
+	var object map[string]any
+	if err := json.Unmarshal([]byte(value), &object); err != nil {
+		return fmt.Errorf("is not a json object: %w", err)
+	}
+
+	if len(object) == 0 {
+		return errors.New("is an empty json object")
+	}
+
+	return nil
+}
+
+// validateKubernetesDocuments checks one Kubernetes excerpt is a `---`-separated
+// stream of non-empty mappings within the size ceiling. Rejecting a scalar or a
+// sequence here means the field holds something object-shaped; whether those
+// objects satisfy the API schema is the authoring-time
+// `kubectl apply --dry-run=server` gate, which needs a cluster and so stays out
+// of `make check`. This is the floor that does run there.
+func validateKubernetesDocuments(value string) error {
+	if lineCount(value) > maxComparisonExcerptLines {
+		return fmt.Errorf("exceeds %d lines", maxComparisonExcerptLines)
+	}
+
+	decoder := yamlv3.NewDecoder(strings.NewReader(value))
+	documents := 0
+
+	for {
+		var document any
+
+		err := decoder.Decode(&document)
+		if errors.Is(err, io.EOF) {
+			break
+		}
+
+		if err != nil {
+			return fmt.Errorf("is not valid yaml: %w", err)
+		}
+
+		documents++
+
+		if document == nil {
+			return fmt.Errorf("document #%d is empty", documents)
+		}
+
+		object, ok := document.(map[string]any)
+		if !ok {
+			return fmt.Errorf("document #%d is not a mapping", documents)
+		}
+
+		if len(object) == 0 {
+			return fmt.Errorf("document #%d is empty", documents)
+		}
+	}
+
+	if documents == 0 {
+		return errors.New("has no documents")
+	}
+
+	return nil
+}
+
+func validateECSAlignments(alignments []ECSAlignment) error {
+	if len(alignments) < minComparisonAlignments || len(alignments) > maxComparisonAlignments {
+		return fmt.Errorf("requires %d to %d alignments", minComparisonAlignments, maxComparisonAlignments)
+	}
+
+	for i, alignment := range alignments {
+		if err := validateECSAlignment(alignment); err != nil {
+			return fmt.Errorf("alignment #%d %w", i+1, err)
+		}
+	}
+
+	return nil
+}
+
+func validateECSAlignment(alignment ECSAlignment) error {
+	err := validateRequiredFields(
+		requiredField{name: "ecs", value: alignment.ECS},
+		requiredField{name: "kubernetes", value: alignment.Kubernetes},
+		requiredField{name: "caveat", value: alignment.Caveat},
+	)
+	if err != nil {
+		return err
+	}
+
+	if _, ok := ecsMappingClasses[alignment.Mapping]; !ok {
+		return fmt.Errorf("mapping %q is not supported", alignment.Mapping)
+	}
+
+	return nil
+}
+
+// requiredField is one deck key that must carry text, named so the error tells
+// the author which YAML field to fix.
+type requiredField struct {
+	name  string
+	value string
+}
+
+func validateRequiredFields(fields ...requiredField) error {
+	for _, field := range fields {
+		if strings.TrimSpace(field.value) == "" {
+			return fmt.Errorf("%s must not be empty", field.name)
+		}
+	}
+
+	return nil
+}
+
+func lineCount(value string) int {
+	return strings.Count(strings.TrimRight(value, "\n"), "\n") + 1
 }
 
 // Get returns a card by id.

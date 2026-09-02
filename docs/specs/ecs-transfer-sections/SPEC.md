@@ -1,7 +1,7 @@
 # ECS Transfer Sections — Technical Spec
 
-**Status**: ⏳ PLANNED
-**Last updated**: 2026-08-02
+**Status**: 🚧 IN PROGRESS
+**Last updated**: 2026-09-02
 
 ## Overview
 
@@ -91,8 +91,11 @@ belongs in `caveat` or the surrounding prose, not in the enum.
 schema requires is present. `omissions` names production concerns — probes,
 resources, rollout policy, traffic policy — and never a required schema field.
 Multi-object excerpts are `---`-separated documents, so `kubernetes_yaml` parses
-as a multi-document stream. Both excerpts must parse (JSON and YAML
-respectively). Field paths and semantics are verified against current official
+as a multi-document stream. Load-time validation enforces shape as well as
+syntax: `ecs_json` is a non-empty JSON object, and every `kubernetes_yaml`
+document is a non-empty mapping with no duplicate keys. Schema conformance
+itself needs an API server and so stays in the dry-run gate below.
+Field paths and semantics are verified against current official
 documentation, and every Kubernetes excerpt is confirmed with
 `kubectl apply --dry-run=server -f -` against the local KIND cluster before its
 card lands. This honors the `k8s-for-ecs-engineers` rule to validate examples
@@ -241,7 +244,7 @@ the service's existing request logging is unchanged.
 
 ## Implementation Phases
 
-### Phase 1: Establish the voice and paired format — ⏳ PLANNED
+### Phase 1: Establish the voice and paired format — 🚧 IN PROGRESS
 
 **Objective**: Validate concise prose anchors and both paired-comparison
 triggers — an object split and a dense field alignment — before applying the
@@ -249,21 +252,22 @@ pattern deck-wide.
 
 **Tasks**:
 
-- [ ] Rewrite the representative M0 `ecs:` anchors with the three-part pattern:
+- [x] Rewrite the representative M0 `ecs:` anchors with the three-part pattern:
       `m0-kubelet-is-the-thing-that-acts` (direct), `m0-kubeconfig-context`
       (partial), and `m0-reconciliation-loop` (no-equivalent).
-- [ ] Create `docs/specs/ecs-transfer-sections/AUDIT.tsv` with the header below
-      and all 63 scoped card IDs seeded as `pending`.
-- [ ] Add failing parser tests in `flashcards/internal/deck/deck_test.go` and
+- [x] Create `docs/specs/ecs-transfer-sections/AUDIT.tsv` with the header below
+      and all 63 scoped card IDs; completed pilot rows carry their terminal
+      dispositions and every unaudited row is `pending`.
+- [x] Add failing parser tests in `flashcards/internal/deck/deck_test.go` and
       web tests in `flashcards/internal/web/web_test.go` for the structured
       comparison contract, validation failures, escaping, and all rendering
       surfaces.
-- [ ] Implement the optional comparison schema and responsive rendering.
-- [ ] Add the object-split pilot to `m1-service-collision`, where the ECS
+- [x] Implement the optional comparison schema and responsive rendering.
+- [x] Add the object-split pilot to `m1-service-collision`, where the ECS
       Service outcome splits across a Deployment and a Kubernetes Service.
-- [ ] Add the dense-field pilot to `m1-rolling-update-knobs`, aligning ECS
+- [x] Add the dense-field pilot to `m1-rolling-update-knobs`, aligning ECS
       `deploymentConfiguration` against `strategy.rollingUpdate`.
-- [ ] Dry-run both pilots' Kubernetes excerpts against the KIND cluster.
+- [x] Dry-run both pilots' Kubernetes excerpts against the KIND cluster.
 - [ ] Review both pilots with the learner against the rubric and revise the
       pattern if needed.
 - [ ] Run deck validation and sync this spec and `AUDIT.tsv` with the accepted
@@ -337,8 +341,10 @@ EKS-managed behavior and finish with a consistency pass.
 - Parser tests: table-driven cases in `flashcards/internal/deck/deck_test.go`
   accept a card without `ecs_comparison`, a complete comparison, and a
   multi-document `kubernetes_yaml`; reject each empty required field, malformed
-  JSON/YAML, fewer than two or more than four alignment rows, incomplete rows,
-  and unknown mapping classifications. Focused command:
+  JSON/YAML, an excerpt that parses but is not object-shaped, a duplicate YAML
+  key, an excerpt past the 25-line ceiling, fewer than two or more than four
+  alignment rows, incomplete rows, and unknown mapping classifications. Focused
+  command:
   `go test ./internal/deck -run ECSComparison`.
 - Web tests: add a dedicated comparison fixture in
   `flashcards/internal/web/web_test.go`. Tests exercise free-recall and

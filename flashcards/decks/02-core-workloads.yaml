@@ -44,6 +44,60 @@ cards:
       ECS Service ≈ K8s **Deployment** (desired count + rolling updates).
       K8s **Service** ≈ the ECS Service's load-balancer / target-group wiring.
       Same word, different half of the job. Disambiguate every single time.
+    ecs_comparison:
+      scenario: >-
+        flashcards runs three replicas behind one stable service endpoint.
+      ecs_json: |
+        {
+          "serviceName": "flashcards",
+          "taskDefinition": "flashcards:7",
+          "desiredCount": 3,
+          "loadBalancers": [{
+            "targetGroupArn": "arn:aws:elasticloadbalancing:region:account:targetgroup/flashcards/example",
+            "containerName": "flashcards",
+            "containerPort": 8080
+          }]
+        }
+      kubernetes_yaml: |
+        apiVersion: apps/v1
+        kind: Deployment
+        metadata: {name: flashcards}
+        spec:
+          replicas: 3
+          selector: {matchLabels: {app: flashcards}}
+          template:
+            metadata: {labels: {app: flashcards}}
+            spec:
+              containers: [{name: flashcards, image: flashcards:dev, ports: [{containerPort: 8080}]}]
+        ---
+        apiVersion: v1
+        kind: Service
+        metadata: {name: flashcards}
+        spec:
+          selector: {app: flashcards}
+          ports: [{port: 8080, targetPort: 8080}]
+      alignments:
+        - ecs: "service.desiredCount"
+          kubernetes: "Deployment.spec.replicas"
+          mapping: direct
+          caveat: >-
+            Both declare the desired replica count; neither field defines the
+            traffic path.
+        - ecs: "service.loadBalancers[]"
+          kubernetes: "Service.spec.selector and Service.spec.ports"
+          mapping: split
+          caveat: >-
+            ECS attaches target-group wiring to the service; Kubernetes puts
+            Pod selection and port mapping in a separate Service object.
+        - ecs: "one ECS Service owns rollout and load-balancer attachment"
+          kubernetes: "Deployment plus Service"
+          mapping: split
+          caveat: >-
+            The Kubernetes objects have independent lifecycles and permissions.
+      consequence: >-
+        Scaling the Deployment does not create or change its stable endpoint.
+      omissions: >-
+        Health probes, rollout policy, resources, and production traffic policy.
     tags: [service, gotcha, naming]
 
   - id: m1-deployment-replicaset-pod
@@ -143,9 +197,58 @@ cards:
       Defaults are 25% each. `maxUnavailable: 0` buys zero-downtime rollouts at
       the cost of temporarily needing extra capacity.
     ecs: |
-      ECS deployment configuration's `minimumHealthyPercent` /
-      `maximumPercent` — the same two dials, expressed as percentages of desired
-      count.
+      ECS `minimumHealthyPercent` and `maximumPercent` are the nearest hooks,
+      but the mapping is partial because Kubernetes expresses allowed loss and
+      surge rather than lower and upper total-task bounds. In either system,
+      settings that require surge capacity can stall when the cluster is full.
+    ecs_comparison:
+      scenario: >-
+        flashcards keeps all three replicas available while allowing three surge replicas.
+      ecs_json: |
+        {
+          "serviceName": "flashcards",
+          "desiredCount": 3,
+          "deploymentConfiguration": {
+            "minimumHealthyPercent": 100,
+            "maximumPercent": 200
+          }
+        }
+      kubernetes_yaml: |
+        apiVersion: apps/v1
+        kind: Deployment
+        metadata: {name: flashcards}
+        spec:
+          replicas: 3
+          strategy:
+            type: RollingUpdate
+            rollingUpdate: {maxUnavailable: 0, maxSurge: 100%}
+          selector: {matchLabels: {app: flashcards}}
+          template:
+            metadata: {labels: {app: flashcards}}
+            spec:
+              containers: [{name: flashcards, image: flashcards:dev}]
+      alignments:
+        - ecs: "service.desiredCount"
+          kubernetes: "Deployment.spec.replicas"
+          mapping: direct
+          caveat: >-
+            Both establish the three-replica baseline used by percentage calculations.
+        - ecs: "deploymentConfiguration.minimumHealthyPercent: 100"
+          kubernetes: "strategy.rollingUpdate.maxUnavailable: 0"
+          mapping: partial
+          caveat: >-
+            Both prevent planned availability from dropping below three, but
+            they express inverse bounds and round percentages differently.
+        - ecs: "deploymentConfiguration.maximumPercent: 200"
+          kubernetes: "strategy.rollingUpdate.maxSurge: 100%"
+          mapping: partial
+          caveat: >-
+            Both permit six total copies, but ECS caps total tasks while
+            Kubernetes caps copies above the desired replica count.
+      consequence: >-
+        The rollout needs spare capacity because neither configuration permits taking an old copy down first.
+      omissions: >-
+        Readiness probes, progress deadlines, automatic rollback, resources, and graceful termination.
     tags: [deployment, rollout]
 
   - id: m1-rollout-commands

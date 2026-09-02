@@ -1,6 +1,7 @@
 package deck_test
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 	"testing/fstest"
@@ -173,6 +174,336 @@ func TestGlossaryTermsAndAliasesAreParsed(t *testing.T) {
 	if len(c.Aliases) != 2 || c.Aliases[0] != "API server" {
 		t.Errorf("Aliases = %v", c.Aliases)
 	}
+}
+
+// The comparison fixture is composed from four parts so a case can swap one
+// whole excerpt without a substitution that has to match every line of it.
+const (
+	validComparisonScenario = `    ecs_comparison:
+      scenario: flashcards runs three replicas behind one stable endpoint.
+`
+
+	validComparisonJSON = `      ecs_json: |
+        {"serviceName":"flashcards","desiredCount":3}
+`
+
+	validComparisonYAML = `      kubernetes_yaml: |
+        apiVersion: apps/v1
+        kind: Deployment
+        metadata: {name: flashcards}
+        spec:
+          replicas: 3
+          selector: {matchLabels: {app: flashcards}}
+          template:
+            metadata: {labels: {app: flashcards}}
+            spec:
+              containers: [{name: flashcards, image: flashcards:dev}]
+        ---
+        apiVersion: v1
+        kind: Service
+        metadata: {name: flashcards}
+        spec:
+          selector: {app: flashcards}
+          ports: [{port: 8080, targetPort: 8080}]
+`
+
+	validComparisonAlignments = `      alignments:
+        - ecs: service.desiredCount
+          kubernetes: Deployment.spec.replicas
+          mapping: direct
+          caveat: Both set the desired replica count.
+        - ecs: service load-balancer wiring
+          kubernetes: Service.spec.selector and ports
+          mapping: split
+          caveat: Kubernetes puts the endpoint in a separate object.
+      consequence: Scaling the Deployment does not change its stable endpoint.
+      omissions: Health probes, resources, and rollout policy.
+`
+
+	validECSComparison = validComparisonScenario +
+		validComparisonJSON +
+		validComparisonYAML +
+		validComparisonAlignments
+)
+
+// comparisonExcerptLineCeiling mirrors deck.maxComparisonExcerptLines, which
+// these black-box tests cannot see. The oversized fixtures below are one line
+// past it, so the two only stay in step if the ceiling is what the tests say.
+const comparisonExcerptLineCeiling = 25
+
+// excerptBlock renders body as a `key: |` block scalar indented to sit inside
+// the comparison fixture.
+func excerptBlock(key string, body []string) string {
+	var b strings.Builder
+
+	b.WriteString("      ")
+	b.WriteString(key)
+	b.WriteString(": |\n")
+
+	for _, line := range body {
+		b.WriteString("        ")
+		b.WriteString(line)
+		b.WriteString("\n")
+	}
+
+	return b.String()
+}
+
+// oversizedJSON and oversizedYAML are well-formed excerpts exactly one line
+// past the ceiling, so size is the only thing they can be rejected for.
+func oversizedJSON() string {
+	body := []string{"{"}
+
+	for i := range comparisonExcerptLineCeiling - 1 {
+		separator := ","
+		if i == comparisonExcerptLineCeiling-2 {
+			separator = ""
+		}
+
+		body = append(body, fmt.Sprintf(`  "field%d": %d%s`, i, i, separator))
+	}
+
+	return excerptBlock("ecs_json", append(body, "}"))
+}
+
+func oversizedYAML() string {
+	body := []string{"apiVersion: v1", "kind: ConfigMap", "metadata: {name: flashcards}", "data:"}
+	for i := range comparisonExcerptLineCeiling - 3 {
+		body = append(body, fmt.Sprintf(`  key%d: "%d"`, i, i))
+	}
+
+	return excerptBlock("kubernetes_yaml", body)
+}
+
+func TestECSComparisonParsesValidShapes(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name       string
+		comparison string
+		want       bool
+	}{
+		{name: "comparison omitted"},
+		{name: "complete multi-document comparison", comparison: validECSComparison, want: true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			body := "deck: D\ncards:\n  - id: a\n    q: q\n    a: a\n" + tt.comparison
+
+			lib, err := loadOne(t, body)
+			if err != nil {
+				t.Fatalf("loading comparison: %v", err)
+			}
+
+			card, ok := lib.Get("a")
+			if !ok {
+				t.Fatal("card was not loaded")
+			}
+
+			if (card.ECSComparison != nil) != tt.want {
+				t.Fatalf("ECSComparison present = %t, want %t", card.ECSComparison != nil, tt.want)
+			}
+
+			if tt.want && len(card.ECSComparison.Alignments) != 2 {
+				t.Errorf("alignments = %d, want 2", len(card.ECSComparison.Alignments))
+			}
+		})
+	}
+}
+
+// rejectedComparison is one mutation of validECSComparison the loader must
+// refuse, and the substring of the load error that says why.
+type rejectedComparison struct {
+	name       string
+	comparison string
+	wantErr    string
+}
+
+// comparisonSub swaps one part of the valid fixture, failing loudly when a
+// fixture edit stops matching. Without that check a stale substitution silently
+// yields the valid fixture, and the case reports the unhelpful "expected an
+// error, got nil" instead of naming the real cause.
+func comparisonSub(t *testing.T, old, replacement string) string {
+	t.Helper()
+
+	out := strings.Replace(validECSComparison, old, replacement, 1)
+	if out == validECSComparison {
+		t.Fatalf("fixture no longer contains %q", old)
+	}
+
+	return out
+}
+
+func runRejectedComparisons(t *testing.T, tests []rejectedComparison) {
+	t.Helper()
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			body := "deck: D\ncards:\n  - id: a\n    q: q\n    a: a\n" + tt.comparison
+
+			_, err := loadOne(t, body)
+			if err == nil {
+				t.Fatal("expected an error, got nil")
+			}
+
+			if !strings.Contains(err.Error(), tt.wantErr) {
+				t.Errorf("error %q does not mention %q", err, tt.wantErr)
+			}
+		})
+	}
+}
+
+// An excerpt is authored by hand and pasted from two different consoles, so the
+// loader has to reject more than a parse failure: something that parses but is
+// not object-shaped, silently loses a duplicated key, or has grown past the
+// size a post-answer aside can carry.
+func TestECSComparisonRejectsInvalidExcerpts(t *testing.T) {
+	t.Parallel()
+
+	const validJSONBody = `{"serviceName":"flashcards","desiredCount":3}`
+
+	runRejectedComparisons(t, []rejectedComparison{
+		{
+			name:       "empty ecs json",
+			comparison: comparisonSub(t, validComparisonJSON, "      ecs_json: ''\n"),
+			wantErr:    "ecs_json must not be empty",
+		},
+		{
+			name:       "malformed ecs json",
+			comparison: comparisonSub(t, validJSONBody, "{not-json"),
+			wantErr:    "ecs_json is not a json object",
+		},
+		{
+			// json.Valid accepts a bare scalar, so syntax alone would let this pass.
+			name:       "ecs json is not an object",
+			comparison: comparisonSub(t, validJSONBody, "3"),
+			wantErr:    "ecs_json is not a json object",
+		},
+		{
+			name:       "empty ecs json object",
+			comparison: comparisonSub(t, validJSONBody, "{}"),
+			wantErr:    "ecs_json is an empty json object",
+		},
+		{
+			name:       "ecs json past the line ceiling",
+			comparison: comparisonSub(t, validComparisonJSON, oversizedJSON()),
+			wantErr:    fmt.Sprintf("ecs_json exceeds %d lines", comparisonExcerptLineCeiling),
+		},
+		{
+			name:       "empty kubernetes yaml",
+			comparison: comparisonSub(t, validComparisonYAML, "      kubernetes_yaml: ''\n"),
+			wantErr:    "kubernetes_yaml must not be empty",
+		},
+		{
+			name:       "malformed kubernetes yaml",
+			comparison: comparisonSub(t, "apiVersion: apps/v1", "apiVersion: [unclosed"),
+			wantErr:    "kubernetes_yaml is not valid yaml",
+		},
+		{
+			// A duplicate key drops a field rather than failing to parse, which is
+			// why the excerpt is decoded by a parser that treats it as an error.
+			name:       "duplicate key in kubernetes yaml",
+			comparison: comparisonSub(t, "        kind: Deployment\n", "        kind: Deployment\n        kind: StatefulSet\n"),
+			wantErr:    "kubernetes_yaml is not valid yaml",
+		},
+		{
+			name:       "kubernetes yaml document is not a mapping",
+			comparison: comparisonSub(t, validComparisonYAML, excerptBlock("kubernetes_yaml", []string{"- apps/v1", "- Deployment"})),
+			wantErr:    "kubernetes_yaml document #1 is not a mapping",
+		},
+		{
+			name:       "empty kubernetes yaml document",
+			comparison: comparisonSub(t, "        ---\n", "        ---\n        ---\n"),
+			wantErr:    "kubernetes_yaml document #2 is empty",
+		},
+		{
+			name:       "kubernetes yaml document has no fields",
+			comparison: comparisonSub(t, "        ---\n", "        ---\n        {}\n        ---\n"),
+			wantErr:    "kubernetes_yaml document #2 is empty",
+		},
+		{
+			name:       "kubernetes yaml holds only comments",
+			comparison: comparisonSub(t, validComparisonYAML, excerptBlock("kubernetes_yaml", []string{"# nothing here"})),
+			wantErr:    "kubernetes_yaml has no documents",
+		},
+		{
+			name:       "kubernetes yaml past the line ceiling",
+			comparison: comparisonSub(t, validComparisonYAML, oversizedYAML()),
+			wantErr:    fmt.Sprintf("kubernetes_yaml exceeds %d lines", comparisonExcerptLineCeiling),
+		},
+	})
+}
+
+// The prose and alignment rows are what keep a comparison a post-answer aside
+// rather than a second answer, so each is required and the row count is bounded.
+func TestECSComparisonRejectsInvalidProseAndAlignments(t *testing.T) {
+	t.Parallel()
+
+	extraAlignments := strings.Repeat(`        - ecs: extra
+          kubernetes: extra
+          mapping: partial
+          caveat: Extra alignment.
+`, 3)
+
+	secondAlignment := `        - ecs: service load-balancer wiring
+          kubernetes: Service.spec.selector and ports
+          mapping: split
+          caveat: Kubernetes puts the endpoint in a separate object.
+`
+	oneAlignment := strings.Replace(validComparisonAlignments, secondAlignment, "", 1)
+
+	runRejectedComparisons(t, []rejectedComparison{
+		{
+			name:       "empty scenario",
+			comparison: comparisonSub(t, "scenario: flashcards runs three replicas behind one stable endpoint.", "scenario: ''"),
+			wantErr:    "scenario must not be empty",
+		},
+		{
+			name:       "empty consequence",
+			comparison: comparisonSub(t, "consequence: Scaling the Deployment does not change its stable endpoint.", "consequence: ''"),
+			wantErr:    "consequence must not be empty",
+		},
+		{
+			name:       "empty omissions",
+			comparison: comparisonSub(t, "omissions: Health probes, resources, and rollout policy.", "omissions: ''"),
+			wantErr:    "omissions must not be empty",
+		},
+		{
+			name:       "one alignment",
+			comparison: comparisonSub(t, validComparisonAlignments, oneAlignment),
+			wantErr:    "requires 2 to 4 alignments",
+		},
+		{
+			name:       "five alignments",
+			comparison: comparisonSub(t, "      consequence:", extraAlignments+"      consequence:"),
+			wantErr:    "requires 2 to 4 alignments",
+		},
+		{
+			name:       "empty alignment ecs",
+			comparison: comparisonSub(t, "ecs: service.desiredCount", "ecs: ''"),
+			wantErr:    "alignment #1 ecs must not be empty",
+		},
+		{
+			name:       "empty alignment kubernetes",
+			comparison: comparisonSub(t, "kubernetes: Deployment.spec.replicas", "kubernetes: ''"),
+			wantErr:    "alignment #1 kubernetes must not be empty",
+		},
+		{
+			name:       "empty alignment caveat",
+			comparison: comparisonSub(t, "caveat: Both set the desired replica count.", "caveat: ''"),
+			wantErr:    "alignment #1 caveat must not be empty",
+		},
+		{
+			name:       "unknown mapping",
+			comparison: comparisonSub(t, "mapping: direct", "mapping: approximate"),
+			wantErr:    `alignment #1 mapping "approximate" is not supported`,
+		},
+	})
 }
 
 func TestRequiresResolvesAndRejectsBadGraphs(t *testing.T) {

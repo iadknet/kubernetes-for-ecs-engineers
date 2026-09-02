@@ -41,6 +41,171 @@ cards:
     tags: [service]
 `
 
+const glossaryDeckFilename = "00-glossary.yaml"
+
+const comparisonDeck = `
+deck: Comparison deck
+module: M1
+cards:
+  - id: compare-card
+    q: What owns the replicas?
+    a: The **Deployment** owns them.
+    ecs: The nearest hook is an ECS Service, but networking is separate.
+    ecs_comparison: &comparison
+      scenario: "**flashcards** runs three replicas. <script>alert('scenario')</script>"
+      ecs_json: |
+        {"serviceName":"flashcards","image":"<unsafe>","desiredCount":3}
+      kubernetes_yaml: |
+        apiVersion: apps/v1
+        kind: Deployment
+        metadata:
+          name: flashcards
+          annotations: {example: "<unsafe>"}
+        spec:
+          replicas: 3
+          selector: {matchLabels: {app: flashcards}}
+          template:
+            metadata: {labels: {app: flashcards}}
+            spec:
+              containers: [{name: flashcards, image: flashcards:dev}]
+      alignments:
+        - ecs: "service.desiredCount"
+          kubernetes: "Deployment.spec.replicas"
+          mapping: direct
+          caveat: "Both set the *desired* replica count."
+        - ecs: "service load-balancer wiring"
+          kubernetes: "Service selector and ports"
+          mapping: split
+          caveat: "Kubernetes puts routing in a **separate object**."
+      consequence: "Scaling the Deployment does *not* change its endpoint."
+      omissions: "Health probes, resources, and rollout policy."
+  - id: compare-checkpoint
+    checkpoint: M1
+    q: Explain the ownership split.
+    a: Use the rubric.
+    ecs_comparison: *comparison
+`
+
+const comparisonGlossary = `
+deck: Comparison glossary
+cards:
+  - id: term-pod
+    term: Pod
+    q: Pod
+    a: The smallest deployable unit.
+    ecs_comparison:
+      scenario: "**flashcards** runs three replicas. <script>alert('scenario')</script>"
+      ecs_json: |
+        {"serviceName":"flashcards","image":"<unsafe>","desiredCount":3}
+      kubernetes_yaml: |
+        apiVersion: apps/v1
+        kind: Deployment
+        metadata: {name: flashcards, annotations: {example: "<unsafe>"}}
+        spec:
+          replicas: 3
+          selector: {matchLabels: {app: flashcards}}
+          template:
+            metadata: {labels: {app: flashcards}}
+            spec:
+              containers: [{name: flashcards, image: flashcards:dev}]
+      alignments:
+        - {ecs: service.desiredCount, kubernetes: Deployment.spec.replicas, mapping: direct, caveat: "Both set the *desired* count."}
+        - {ecs: service networking, kubernetes: Service, mapping: split, caveat: "Routing is a **separate object**."}
+      consequence: "Scaling does *not* change the endpoint."
+      omissions: "Health probes, resources, and rollout policy."
+  - {id: term-node, term: node, q: node, a: A worker machine.}
+  - {id: term-service, term: Service, q: Service, a: A stable endpoint.}
+  - {id: term-deployment, term: Deployment, q: Deployment, a: A workload controller.}
+`
+
+func comparisonServer(t *testing.T) http.Handler {
+	t.Helper()
+
+	h, _, _ := serverOver(t, map[string]string{
+		glossaryDeckFilename: comparisonGlossary,
+		"02-core.yaml":       comparisonDeck,
+	})
+
+	return h
+}
+
+func assertECSComparison(t *testing.T, body string) {
+	t.Helper()
+
+	for _, want := range []string{
+		"Coming from ECS",
+		"ECS/Fargate JSON",
+		"Kubernetes YAML",
+		"service.desiredCount",
+		"Deployment.spec.replicas",
+		"direct",
+		"Consequence",
+		"Omissions",
+		"<strong>flashcards</strong>",
+		"<em>desired</em>",
+		"<em>not</em>",
+		"&lt;unsafe&gt;",
+	} {
+		if !strings.Contains(body, want) {
+			t.Errorf("comparison does not contain %q:\n%s", want, body)
+		}
+	}
+
+	for _, unsafe := range []string{"<script>alert('scenario')</script>", "<unsafe>"} {
+		if strings.Contains(body, unsafe) {
+			t.Errorf("comparison rendered unsafe input %q:\n%s", unsafe, body)
+		}
+	}
+}
+
+func TestECSComparisonRendersOnEveryCardSurface(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name   string
+		method string
+		path   string
+	}{
+		{name: "free recall result", method: http.MethodPost, path: "/drill/compare-card/reveal"},
+		{name: "recognition result", method: http.MethodPost, path: "/drill/term-pod/pick?p=term-pod"},
+		{name: "browse", method: http.MethodGet, path: "/browse?deck=core"},
+		{name: "checkpoint reveal", method: http.MethodPost, path: "/checkpoint/compare-checkpoint/reveal?module=M1"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			rec := do(t, comparisonServer(t), tt.method, tt.path)
+			if rec.Code != http.StatusOK {
+				t.Fatalf("%s %s = %d: %s", tt.method, tt.path, rec.Code, rec.Body)
+			}
+
+			assertECSComparison(t, rec.Body.String())
+		})
+	}
+}
+
+func TestECSComparisonMarkupSupportsResponsiveOrdering(t *testing.T) {
+	t.Parallel()
+
+	body := do(t, comparisonServer(t), http.MethodGet, "/browse?deck=core").Body.String()
+	for _, want := range []string{
+		`class="ecs-comparison-grid"`,
+		`class="ecs-comparison-excerpt ecs-comparison-ecs"`,
+		`class="ecs-comparison-excerpt ecs-comparison-kubernetes"`,
+		"@media (max-width: 48rem)",
+	} {
+		if !strings.Contains(body, want) {
+			t.Errorf("responsive comparison markup does not contain %q", want)
+		}
+	}
+
+	if strings.Index(body, "ecs-comparison-ecs") > strings.Index(body, "ecs-comparison-kubernetes") {
+		t.Error("ECS excerpt must precede Kubernetes excerpt in document order")
+	}
+}
+
 func newServer(t *testing.T) http.Handler {
 	t.Helper()
 
@@ -486,7 +651,7 @@ func gatedServer(t *testing.T) (http.Handler, *deck.Library) {
 	t.Helper()
 
 	h, lib, _ := serverOver(t, map[string]string{
-		"00-glossary.yaml":    gatedDecks,
+		glossaryDeckFilename:  gatedDecks,
 		"01-foundations.yaml": gatedModule,
 	})
 
@@ -615,7 +780,7 @@ cards:
 func recognitionServer(t *testing.T) (http.Handler, *review.Store) {
 	t.Helper()
 
-	h, _, store := serverOver(t, map[string]string{"00-glossary.yaml": recognitionDeck})
+	h, _, store := serverOver(t, map[string]string{glossaryDeckFilename: recognitionDeck})
 
 	return h, store
 }
@@ -1234,7 +1399,7 @@ cards:
 // clockDecks is one fixture that reaches every route: the glossary above for
 // /drill and /pick, and the checkpoint module for the three checkpoint routes.
 func clockDecks() map[string]string {
-	decks := map[string]string{"00-glossary.yaml": clockGlossary}
+	decks := map[string]string{glossaryDeckFilename: clockGlossary}
 	maps.Copy(decks, checkpointDecks())
 
 	return decks

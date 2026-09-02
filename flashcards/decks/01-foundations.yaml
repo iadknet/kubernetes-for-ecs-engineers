@@ -87,9 +87,10 @@ cards:
     requires:
       [term-kubelet, term-api-server, term-container, term-cri, term-node]
     ecs: |
-      The ECS agent on an EC2 container instance, near enough 1:1 — including
-      that when it stops reporting, the control plane marks the machine
-      unhealthy rather than noticing the workload is gone.
+      The nearest hook is the ECS container agent on an EC2 container instance:
+      both node agents start assigned containers and report machine state. The
+      mapping is direct for that operational role, not for the surrounding API;
+      when the agent stops reporting, investigate the node before the workload.
     tags: [node, kubelet, architecture]
 
   - id: m0-reconciliation-loop
@@ -119,10 +120,11 @@ cards:
         term-deployment,
       ]
     ecs: |
-      **No real ECS equivalent — this one is genuinely new.**
-      `aws ecs update-service` is an imperative call: it executes once and
-      returns. Nothing here "finishes"; it converges. Almost everything else in
-      Kubernetes follows from this one property.
+      ECS Service desired-count maintenance is a useful hook, but ECS has no
+      equivalent to the general, extensible reconciliation model Kubernetes
+      applies to every API object — almost everything else here follows from
+      that one property. Controllers keep converging after `kubectl` returns, so
+      delete the owner or change desired state instead of deleting Pods again.
     tags: [reconciliation, mental-model, no-ecs-equivalent]
 
   - id: m0-declarative-vs-imperative
@@ -192,9 +194,10 @@ cards:
           kubectl config use-context kind-k8s-training
     requires: [term-kubeconfig, term-cluster, term-namespace, term-kubectl]
     ecs: |
-      An AWS named profile plus a region. `use-context` ≈ `export AWS_PROFILE`.
-      The failure mode is identical and just as embarrassing: the right command
-      against the wrong cluster.
+      The nearest hook is an AWS named profile plus region, but the mapping is
+      partial: a context also selects a cluster endpoint and default namespace.
+      Before a surprising read or any write, inspect the current context just as
+      you would verify account, role, and region before an ECS change.
     tags: [kubectl, kubeconfig]
 
   - id: m0-what-a-namespace-does-not-isolate
