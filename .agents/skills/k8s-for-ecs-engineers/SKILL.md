@@ -10,6 +10,10 @@ analogy distort Kubernetes. The target is a workload-focused SRE/DevOps
 engineer who can deploy, debug, harden, and develop against Kubernetes APIs;
 cluster internals matter only where they affect workloads or interviews.
 
+This skill owns teaching *content*; its companion `clear-teaching-writing` owns
+the prose *style* of cards and explanations. Apply that skill when the wording,
+not the facts, is what needs work.
+
 Use [`docs/target-roles.md`](../../../docs/target-roles.md) for the quality bar
 and the Teleport challenge, without overfitting the broader curriculum to two
 roles. When work resembles that challenge, require its actual bar: design
