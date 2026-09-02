@@ -113,16 +113,16 @@ without manufacturing weak analogies.
 - `docs/specs/ecs-transfer-sections/AUDIT.tsv` — terminal dispositions for both
   decks
 
-### Phase 2: Improve the EKS lens and complete the audit — ⏳ PLANNED
+### Phase 2: Improve the EKS lens and complete the audit — 🚧 IN PROGRESS
 
 **Objective**: Make the AWS-specific deck distinguish portable Kubernetes from
 EKS-managed behavior and finish with a consistency pass.
 
 **Tasks**:
 
-- [ ] Audit all 16 cards in `11-eks-and-aws.yaml` for the same comparison
+- [x] Audit all 16 cards in `11-eks-and-aws.yaml` for the same comparison
       pattern and current AWS behavior.
-- [ ] Mark every deck-11 row `portable` or `eks-specific` in the `lens` column.
+- [x] Mark every deck-11 row `portable` or `eks-specific` in the `lens` column.
 - [ ] Review all changed sections together for repetition, contradictions, and
       overlong explanations.
 - [ ] Run the full flashcards checks.

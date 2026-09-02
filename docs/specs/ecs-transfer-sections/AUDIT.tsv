@@ -46,19 +46,19 @@ m1-restart-policy	02-core-workloads	add	Real genuinely-new note: ECS has no in-p
 m1-port-forward	02-core-workloads	keep	Accurate: ECS Exec / SSM port forwarding; same break-glass role and same reason it is not user-facing.		
 m1-kind-load-image	02-core-workloads	not-useful	KIND-local tooling gotcha; ECS always pulls from a registry, so there is no real transfer (consistent with m0-kind-image-loading).		
 m1-what-m1-is-missing	02-core-workloads	add	Real reframe: ECS bundled probes / minimum-healthy-percent / Service Auto Scaling into the service and its ALB; Kubernetes unbundles them into separate objects you add deliberately.	https://docs.aws.amazon.com/AmazonECS/latest/developerguide/service-auto-scaling.html	
-eks-what-aws-manages	11-eks-and-aws	pending			eks-specific
-eks-vpc-cni-ip-exhaustion	11-eks-and-aws	pending			eks-specific
-eks-prefix-delegation	11-eks-and-aws	pending			eks-specific
-eks-irsa-vs-pod-identity	11-eks-and-aws	pending			eks-specific
-eks-two-authz-systems	11-eks-and-aws	pending			eks-specific
-eks-cluster-creator-admin	11-eks-and-aws	pending			eks-specific
-eks-lb-controller	11-eks-and-aws	pending			eks-specific
-eks-target-type-ip	11-eks-and-aws	pending			eks-specific
-eks-fargate-limits	11-eks-and-aws	pending			eks-specific
-eks-auto-mode	11-eks-and-aws	pending			eks-specific
-eks-karpenter	11-eks-and-aws	pending			eks-specific
-eks-ebs-single-az	11-eks-and-aws	pending			eks-specific
-eks-addons	11-eks-and-aws	pending			eks-specific
-eks-version-support	11-eks-and-aws	pending			eks-specific
-eks-upgrade-workload-impact	11-eks-and-aws	pending			eks-specific
-eks-portable-vs-aws	11-eks-and-aws	pending			portable
+eks-what-aws-manages	11-eks-and-aws	keep	Accurate, concise anchor: EKS peels back fewer layers than Fargate, and the exposed seams are the new work.	https://docs.aws.amazon.com/eks/latest/userguide/eks-architecture.html	eks-specific
+eks-vpc-cni-ip-exhaustion	11-eks-and-aws	keep	Accurate awsvpc-per-task-ENI hook with a sharper-failure consequence; same density model, Pod counts make it bite harder.	https://docs.aws.amazon.com/eks/latest/userguide/cni-increase-ip-addresses.html	eks-specific
+eks-prefix-delegation	11-eks-and-aws	add	Real transfer: the awsvpc density ceiling an ECS engineer raised with ENI trunking maps to prefix delegation (a /28 of 16 IPs per ENI); same problem, different lever.	https://docs.aws.amazon.com/eks/latest/userguide/cni-increase-ip-addresses.html https://docs.aws.amazon.com/AmazonECS/latest/developerguide/container-instance-eni.html	eks-specific
+eks-irsa-vs-pod-identity	11-eks-and-aws	rewrite	Sharpen to three-part: the single taskRoleArn field splits into a ServiceAccount plus a cluster-wired IAM role (OIDC trust for IRSA, association for Pod Identity), so more places fail silently. Pod Identity confirmed the current default for new clusters.	https://docs.aws.amazon.com/eks/latest/userguide/pod-identities.html https://aws.amazon.com/blogs/containers/amazon-eks-pod-identity-a-new-way-for-applications-on-eks-to-obtain-iam-credentials/	eks-specific
+eks-two-authz-systems	11-eks-and-aws	add	Real transfer: on ECS one IAM call both authenticates and authorizes; EKS splits authN (IAM) from authZ (RBAC, which ignores IAM), which is why an account admin gets Forbidden.	https://docs.aws.amazon.com/eks/latest/userguide/access-entries.html	eks-specific
+eks-cluster-creator-admin	11-eks-and-aws	not-useful	The transferable instinct (IAM never makes a principal special for creating a resource) is real but thin, and the two-system authZ transfer already lands in eks-two-authz-systems; a second aws-auth-adjacent anchor would repeat.		eks-specific
+eks-lb-controller	11-eks-and-aws	rewrite	Keep the strong ECS service->target-group->ALB mapping but add the boundary/consequence: unlike ECS's built-in wiring, an installed controller reconciles the Ingress, and without it the object is inert.	https://docs.aws.amazon.com/eks/latest/userguide/aws-load-balancer-controller.html	eks-specific
+eks-target-type-ip	11-eks-and-aws	blocked-factual-defect	Answer claims target-type ip 'is the default choice with the VPC CNI'; AWS documents instance as the controller default and ip must be set explicitly (recommended with VPC CNI, required for Fargate/hybrid nodes). Defect is in `a`, outside the ECS fields; needs a human fix before an anchor lands.	https://docs.aws.amazon.com/eks/latest/userguide/alb-ingress.html	eks-specific
+eks-fargate-limits	11-eks-and-aws	keep	Accurate: it is Fargate with the same trade-offs, but Kubernetes leans on DaemonSets far more than ECS, so their absence hurts more (log shipper/node agents become sidecars).	https://docs.aws.amazon.com/eks/latest/userguide/fargate.html	eks-specific
+eks-auto-mode	11-eks-and-aws	add	Real transfer that corrects a likely misread: Auto Mode reads like Fargate but still runs real EC2 nodes under a managed Karpenter, so node-level constructs like DaemonSets keep working, unlike Fargate's per-Pod micro-VMs.	https://docs.aws.amazon.com/eks/latest/userguide/automode.html	eks-specific
+eks-karpenter	11-eks-and-aws	keep	Accurate: ECS Capacity Providers with managed scaling, but far more aggressive about replacing and consolidating nodes; the workload-side takeaway (PDBs, graceful shutdown) is carried by the answer.	https://karpenter.sh/docs/concepts/disruption/	eks-specific
+eks-ebs-single-az	11-eks-and-aws	add	Real transfer: the EBS-single-AZ / EFS-multi-AZ facts carry straight from EC2/ECS; the new part is the failure surface -- an EBS-bound Pod is AZ-pinned and goes Pending when its AZ is full, and WaitForFirstConsumer defers the volume so the two agree.	https://docs.aws.amazon.com/eks/latest/userguide/ebs-csi.html https://kubernetes.io/docs/concepts/storage/storage-classes/#volume-binding-mode	eks-specific
+eks-addons	11-eks-and-aws	add	Real reframe: ECS never made you install or version a CNI/DNS/CSI driver -- AWS bundled that into the platform; EKS surfaces them as versioned add-ons you own, and add-on drift becomes an upgrade failure mode.	https://docs.aws.amazon.com/eks/latest/userguide/workloads-add-ons-available-eks.html	eks-specific
+eks-version-support	11-eks-and-aws	add	Real transfer: ECS had no upgrade treadmill; EKS gives each minor ~14 months standard support, then pricier extended support, then a forced upgrade, making upgrades a recurring calendar item. Distinct from m0-api-groups (manifest removal).	https://docs.aws.amazon.com/eks/latest/userguide/kubernetes-versions.html	eks-specific
+eks-upgrade-workload-impact	11-eks-and-aws	keep	Accurate: an ECS capacity-provider instance refresh, but cluster-wide and on a schedule you do not control; the deprecated-API and node-roll survival work is carried by the answer.	https://kubernetes.io/docs/reference/using-api/deprecation-guide/	eks-specific
+eks-portable-vs-aws	11-eks-and-aws	add	Real reframe for the deck's closer: coming from ECS no orchestration skill traveled; Kubernetes inverts that, so the workload layer is portable to GKE/AKS/bare metal and only this deck's slice stays AWS-only.		portable

@@ -42,6 +42,12 @@ cards:
 
       Alternatives: larger instance types, or custom networking with a secondary
       CIDR for Pods.
+    ecs: |
+      You hit this ceiling on ECS too: `awsvpc` tasks are capped by ENIs per
+      instance, and you raised it with **ENI trunking**. Prefix delegation is
+      the same move on EKS with a different lever — pack a /28 of 16 IPs onto
+      each ENI instead of adding more ENIs. Same density problem, a
+      platform-team knob you set once.
     tags: [networking, cni, capacity]
 
   - id: eks-irsa-vs-pod-identity
@@ -56,8 +62,12 @@ cards:
       provider, no annotation, roles reusable across clusters. The current
       default for new clusters.
     ecs: |
-      Both re-create the ECS **Task Role**. Vanilla Kubernetes has no concept of
-      AWS IAM — this bridge is entirely AWS-specific.
+      Both rebuild the ECS **task role** — the `taskRoleArn` you set once on a
+      task definition. Plain Kubernetes has no notion of AWS IAM, so that one
+      field becomes a ServiceAccount plus an IAM role wired to the cluster: a
+      trust policy naming the OIDC provider (IRSA), or an association (Pod
+      Identity). More moving parts, and more places a role assumption fails
+      silently.
     tags: [iam, identity]
 
   - id: eks-two-authz-systems
@@ -70,6 +80,12 @@ cards:
 
       Access entries (or the legacy `aws-auth` ConfigMap) map the IAM principal
       to K8s users/groups. Two stacked authorization systems.
+    ecs: |
+      On ECS, IAM is the whole door: `ecs:UpdateService` both proves who you are
+      and authorizes the call. EKS splits that in two — IAM only authenticates
+      you to the API server, then Kubernetes RBAC decides what you may do and
+      never reads your IAM policies. That split is why an account admin can still
+      get `Forbidden`.
     tags: [iam, rbac, gotcha]
 
   - id: eks-cluster-creator-admin
@@ -94,8 +110,11 @@ cards:
       Without the controller installed, both objects sit there doing nothing.
       Most real configuration lives in annotations.
     ecs: |
-      The closest one-to-one mapping in the whole model: ECS Service → target
-      group → ALB becomes Ingress → Service → ALB.
+      The closest thing to a one-to-one mapping in the model: ECS service →
+      target group → ALB becomes Ingress → Service → ALB. The catch is the
+      arrow. On ECS the service wired itself to the load balancer; here a
+      controller you install watches the Ingress and builds the ALB — leave it
+      out and the object just sits there.
     tags: [networking, ingress, loadbalancer]
 
   - id: eks-target-type-ip
@@ -132,6 +151,12 @@ cards:
       cluster.
 
       Least operational surface, least control, highest per-hour cost.
+    ecs: |
+      This sounds like Fargate: hands off, AWS runs it. But the bargain differs.
+      Auto Mode still puts your Pods on real EC2 nodes, provisioned and patched
+      by a managed Karpenter; Fargate gives each Pod its own micro-VM and no node
+      at all. So node-level things you lose on Fargate, like DaemonSets, still
+      work here.
     tags: [compute, managed]
 
   - id: eks-karpenter
@@ -160,6 +185,13 @@ cards:
 
       Use `volumeBindingMode: WaitForFirstConsumer` so the volume is created
       where the Pod lands, or EFS for cross-AZ.
+    ecs: |
+      The AWS storage facts are the ones you already carry from EC2/ECS: an EBS
+      volume lives in one AZ and attaches to one thing at a time, while EFS is
+      the multi-AZ NFS. What's new is where it bites. A Pod bound to an EBS PVC
+      can only schedule in that volume's AZ, so a full AZ leaves it `Pending`
+      while other AZs sit idle — `WaitForFirstConsumer` defers the volume until
+      the Pod lands so the two agree.
     tags: [storage, multi-az, gotcha]
 
   - id: eks-addons
@@ -172,6 +204,12 @@ cards:
 
       They still have versions that must stay compatible with the cluster
       version — add-on drift is a real upgrade failure mode.
+    ecs: |
+      On ECS you never installed a CNI, cluster DNS, or a CSI driver — AWS baked
+      that plumbing into the platform and versioned it out of sight. EKS hands
+      those pieces back as named add-ons with their own versions. The new chore:
+      keep each add-on compatible with the cluster version, because add-on drift
+      is a real way an upgrade breaks.
     tags: [addons, upgrades]
 
   - id: eks-version-support
@@ -183,6 +221,12 @@ cards:
       upgrade.
 
       So upgrades are a recurring, scheduled reality — not a one-off project.
+    ecs: |
+      ECS never put you on an upgrade treadmill — AWS patched the platform under
+      you and you rarely scheduled a version bump. EKS does: each minor version
+      gets about 14 months of standard support, then pricier extended support,
+      then a forced upgrade. Cluster upgrades become a standing operational
+      commitment you own, not the background AWS chore they were on ECS.
     tags: [upgrades, operations]
 
   - id: eks-upgrade-workload-impact
@@ -213,4 +257,10 @@ cards:
 
       The portable set is the career-durable part; keep the two mentally
       separate in interviews.
+    ecs: |
+      Coming from ECS, none of your orchestration skills traveled — they were
+      AWS-locked by definition. Kubernetes inverts that: the workload layer in
+      the first list runs the same on GKE, AKS, or bare metal, and only the slice
+      this deck covers stays AWS-only. Most of what you're learning now moves
+      with you.
     tags: [portability, career]
