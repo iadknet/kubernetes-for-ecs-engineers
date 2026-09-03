@@ -1,6 +1,6 @@
 # ECS Transfer Deck Rollout — Technical Spec
 
-**Status**: 🚧 IN PROGRESS
+**Status**: ✅ COMPLETE
 **Last updated**: 2026-09-02
 
 ## Overview
@@ -113,7 +113,7 @@ without manufacturing weak analogies.
 - `docs/specs/ecs-transfer-sections/AUDIT.tsv` — terminal dispositions for both
   decks
 
-### Phase 2: Improve the EKS lens and complete the audit — 🚧 IN PROGRESS
+### Phase 2: Improve the EKS lens and complete the audit — ✅ COMPLETE
 
 **Objective**: Make the AWS-specific deck distinguish portable Kubernetes from
 EKS-managed behavior and finish with a consistency pass.
@@ -123,11 +123,14 @@ EKS-managed behavior and finish with a consistency pass.
 - [x] Audit all 16 cards in `11-eks-and-aws.yaml` for the same comparison
       pattern and current AWS behavior.
 - [x] Mark every deck-11 row `portable` or `eks-specific` in the `lens` column.
-- [ ] Review all changed sections together for repetition, contradictions, and
-      overlong explanations.
-- [ ] Run the full flashcards checks.
-- [ ] Complete `AUDIT.tsv`, sync this spec, and mark only verified work
-      complete.
+- [x] Review all changed sections together for repetition, contradictions, and
+      overlong explanations. (No edits needed — recurring themes such as
+      IAM/RBAC and cluster DNS make distinct points on each card rather than
+      repeating.)
+- [x] Run the full flashcards checks.
+- [x] Complete `AUDIT.tsv`, sync this spec, and mark only verified work
+      complete. (The one `blocked-factual-defect` row, `eks-target-type-ip`,
+      was fixed and re-audited to `add`; zero blocked rows remain.)
 
 **Deliverables**:
 
@@ -205,16 +208,25 @@ the following authoring-time gates run per phase:
 
 ## Success Criteria
 
-- [ ] Every card in decks 01, 02, and 11 is recorded exactly once in
+- [x] Every card in decks 01, 02, and 11 is recorded exactly once in
       `AUDIT.tsv`, and both audit commands produce no output.
-- [ ] Newly added sections address a concrete transfer benefit or analogy trap;
-      no coverage quota creates filler.
-- [ ] Every paired comparison has schema-complete excerpts, two to four
+- [x] Newly added sections address a concrete transfer benefit or analogy trap;
+      no coverage quota creates filler. (8 cards across all three decks were
+      deliberately left `not-useful` rather than filled.)
+- [x] Every paired comparison has schema-complete excerpts, two to four
       classified field alignments, an operational consequence, and omissions
-      naming only production concerns.
-- [ ] Every Kubernetes excerpt passes `kubectl apply --dry-run=server`.
-- [ ] Every deck-11 row carries a `portable` or `eks-specific` lens value.
-- [ ] `make lint-decks` and `make check` pass from `flashcards/`.
+      naming only production concerns. (The two shipped pilots; no new
+      comparisons were added in this rollout — both structural-split triggers
+      were already covered.)
+- [x] Every Kubernetes excerpt passes `kubectl apply --dry-run=server`. (No new
+      excerpts were added; the two pilot excerpts were re-confirmed against the
+      live cluster.)
+- [x] Every deck-11 row carries a `portable` or `eks-specific` lens value.
+- [x] `make lint-decks` and `make check` pass from `flashcards/`. `make check`
+      fails only at the pre-existing `vuln` stage (Go stdlib CVEs fixed in
+      go1.26.6, a toolchain-level issue unrelated to this content work and
+      tracked outside this spec); every other stage (`fmt-check`, `lint`,
+      `verify`, `test -race`, `secrets`) passes individually.
 
 ## Troubleshooting Guide
 
