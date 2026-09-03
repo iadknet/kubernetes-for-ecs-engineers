@@ -113,7 +113,7 @@ ECS/Fargate equivalent or explicitly flagged as having none.
 
 <p align="center">
   <img src="docs/images/drill.gif" width="720"
-       alt="The flashcard drill in action: an M0 card asks its question, reveals the answer with a runnable command and a 'Coming from ECS' callout, then grades and advances to the next card.">
+       alt="The flashcard drill in action: M1 core-workloads cards — Pod, Deployment, and Service — each reveal their answer and a 'Coming from ECS' callout (Pod maps to a Task, Deployment/ReplicaSet to Service + Task Definition revisions, Service types to target-group wiring), then grade and advance.">
 </p>
 
 `decks/00-glossary.yaml` is a **glossary tier**: 72 cards, one term apiece,
