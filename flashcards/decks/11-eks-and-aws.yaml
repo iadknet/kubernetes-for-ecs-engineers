@@ -124,7 +124,15 @@ cards:
       Traffic goes **directly to Pod IPs** instead of to a NodePort on each
       node — removing an extra network hop and preserving the client source IP.
 
-      It's the default choice with the VPC CNI, and required for Fargate Pods.
+      `instance` is the controller's default; you set `ip` explicitly. It is the
+      recommended choice once the VPC CNI gives Pods routable VPC IPs, and it is
+      required for Fargate Pods.
+    ecs: |
+      On ECS with `awsvpc` networking — all of Fargate — tasks already registered
+      in the target group by their ENI IP, so routing straight to the task was
+      just how it worked. Here that path is the opt-in: `instance` is the default
+      and adds the NodePort hop back, so you set `target-type: ip` to get the
+      ECS-style direct route.
     tags: [networking, loadbalancer]
 
   - id: eks-fargate-limits
