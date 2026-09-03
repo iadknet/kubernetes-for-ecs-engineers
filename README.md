@@ -102,6 +102,11 @@ Concepts, vocabulary, and acronyms live in **[flashcards/](flashcards/)** —
 329 cards scheduled with FSRS spaced repetition, every one anchored to its
 ECS/Fargate equivalent or explicitly flagged as having none.
 
+<p align="center">
+  <img src="docs/images/drill.gif" width="720"
+       alt="The flashcard drill in action: an M0 card asks its question, reveals the answer with a runnable command and a 'Coming from ECS' callout, then grades and advances to the next card.">
+</p>
+
 `decks/00-glossary.yaml` is a **glossary tier**: 72 cards, one term apiece,
 defined in isolation. Concept cards declare the terms they depend on with
 `requires:`, and a card is not introduced until those terms are retained — so
