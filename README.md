@@ -148,6 +148,23 @@ Drill by module (`/drill?module=M3`) to stay inside what you've covered. The
 dashboard's **locked** count is cards waiting on vocabulary you haven't
 retained yet — it shrinks as the glossary lands.
 
+### Ask about a card
+
+`make run-chat` adds a tutor panel to the drill view — it shells out to a
+logged-in `claude` CLI running locally inside this repo. Ask it to expand on the
+card in front of you and it anchors the answer to the ECS/Fargate equivalent;
+because a drill whose answers are one question away stops being recall practice,
+it explains *around* the card rather than handing you its answer.
+
+<p align="center">
+  <img src="docs/images/chat.gif" width="720"
+       alt="The card's chat panel: asking 'Can you give me examples of the config in Kubernetes and the same config in ECS and explain how they align?' and Claude answering with an ECS task-definition JSON example, the equivalent ConfigMap YAML, and a table aligning the two — env vars in the task def vs data: keys, new task-def revision vs editing the ConfigMap.">
+</p>
+
+```bash
+cd flashcards && make run-chat   # http://localhost:8080, with the chat panel
+```
+
 ### Checkpoints
 
 `/checkpoint?module=M0` is the module's **knowledge bar**: a short set of
