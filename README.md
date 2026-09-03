@@ -1,5 +1,12 @@
 # Kubernetes Training Program
 
+[![License: MIT](https://img.shields.io/github/license/iadknet/kubernetes-for-ecs-engineers)](LICENSE)
+
+> This repository is public as a learning artifact and portfolio piece. It's a
+> personal, solo program written in the first person — you're welcome to read it,
+> run the flashcard app, and borrow anything useful. It isn't seeking outside
+> contributions, and issues/PRs may go unanswered.
+
 A guided, hands-on program to take me from **deep AWS ECS/Fargate experience
 and zero Kubernetes** to being able to pass the take-home coding challenges
 for the [target roles](docs/target-roles.md) I'm applying to — culminating
@@ -80,8 +87,10 @@ live in **[docs/curriculum.md](docs/curriculum.md)**.
 ## Repo layout
 
 ```
-kubernetes_training/
+kubernetes-for-ecs-engineers/
 ├── README.md                 # you are here
+├── LICENSE                   # MIT
+├── SECURITY.md               # how to report a vulnerability privately
 ├── AGENTS.md                 # how work gets done here (spec-first workflow, conventions)
 ├── CLAUDE.md                 # thin import of AGENTS.md
 ├── docs/
@@ -182,3 +191,12 @@ back and we'll review and move to M1.
   and portfolio. Teleport's challenge explicitly says not to outsource the
   actual take-home to AI — so the capstone here is a rehearsal, and the real
   submission gets written by me.
+
+## Security
+
+Found a security issue in the flashcard app? Please report it privately — see
+**[SECURITY.md](SECURITY.md)**.
+
+## License
+
+Released under the [MIT License](LICENSE). © 2026 Isaac Stefanek.
