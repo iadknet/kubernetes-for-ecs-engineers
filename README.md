@@ -2,10 +2,19 @@
 
 [![License: MIT](https://img.shields.io/github/license/iadknet/kubernetes-for-ecs-engineers)](LICENSE)
 
-> This repository is public as a learning artifact and portfolio piece. It's a
-> personal, solo program written in the first person — you're welcome to read it,
-> run the flashcard app, and borrow anything useful. It isn't seeking outside
-> contributions, and issues/PRs may go unanswered.
+> This was a vibe coded experiment to see if I could build an app to help
+> me translate my experience from ECS/Fargate into Kubernetes.
+>
+> The flashcards have been useful in helping me get more concrete familiarity
+> with Kubernetes vocabulary and I have found the chatbot extremely useful for
+> diving into more detail when I need more context and explanation.
+>
+> The LLM is pretty terrible at wording the questions and I have been working on
+> creating a set of skills to try and guide it toward writing better teaching materials
+> with limited success. There is still no replacement for a good human instructional designer.
+>
+> The most useful artifact in the project for me has been the skill that guides the LLM
+> in grounding any Kubernetes explanation in ECS/Fargate experience.
 
 A guided, hands-on program to take me from **deep AWS ECS/Fargate experience
 and zero Kubernetes** to being able to pass the take-home coding challenges
