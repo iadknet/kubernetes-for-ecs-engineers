@@ -1,17 +1,22 @@
 # ECS Transfer Sections — Technical Spec
 
-**Status**: 🚧 IN PROGRESS
+**Status**: ✅ COMPLETE
 **Last updated**: 2026-09-02
 
 ## Overview
 
-Improve the flashcards' **Coming from ECS** sections so they transfer an
-experienced ECS/Fargate engineer's operational instincts without forcing false
-one-to-one mappings. Where configuration structure carries the lesson, the
-section presents matching ECS JSON and Kubernetes YAML side by side. Scope is
-the decks whose modules are reachable now — M0, M1, and the EKS lens — plus the
-schema and rendering support the pattern needs. M2–M7 inherit the pattern as
-each module is reached.
+Establish the flashcards' **Coming from ECS** transfer pattern: honest concept
+mappings — direct, partial, split, and no-equivalent — that carry an ECS/Fargate
+engineer's operational instincts without forcing false one-to-one analogies,
+plus a structured `ecs_comparison:` format that presents matching ECS JSON and
+Kubernetes YAML side by side where configuration structure carries the lesson.
+This spec delivered the schema, load-time validation, responsive rendering, and
+the accepted voice, validated on three M0 prose pilots and two M1 paired pilots.
+
+Rolling the pattern across every card of M0, M1, and the EKS lens is a separate
+effort — see
+[`docs/specs/ecs-transfer-deck-rollout/SPEC.md`](../ecs-transfer-deck-rollout/SPEC.md).
+M2–M7 inherit the pattern as each module is reached.
 
 ## Business Requirements
 
@@ -28,22 +33,19 @@ each module is reached.
 
 ### Scope
 
-- Audit and improve `ecs:` content in `01-foundations.yaml` (M0),
-  `02-core-workloads.yaml` (M1), and `11-eks-and-aws.yaml` — 63 cards.
-- Add structured paired-configuration content to cards where at least two
-  directives align meaningfully or one ECS object maps across Kubernetes
-  objects.
-- Add an `ecs:` section to a card only when prior ECS/Fargate knowledge creates
-  useful transfer or a likely misconception.
+- Define the `ecs_comparison:` schema and the three-part `ecs:` prose contract,
+  with load-time validation and responsive side-by-side rendering.
+- Validate the pattern on five pilot cards: three M0 prose anchors (direct,
+  partial, no-equivalent) and two M1 paired-configuration comparisons (object
+  split, dense field alignment).
+- Seed `AUDIT.tsv` with all 63 scoped card IDs and record the pilots' terminal
+  dispositions.
 - Preserve each card's existing question, tested answer, module, and glossary
-  prerequisites. If the audit exposes a defect outside `ecs:` or
-  `ecs_comparison:`, record it as `blocked-factual-defect` in the audit and open
-  separately scoped work. Do not widen this spec to absorb it.
-- Decks `03`–`08` (M2–M7) inherit the content rules below when each module is
-  reached, as part of that module's glossary-allowlist drain
-  (`AGENTS.md`, "Vocabulary is gated"), which rewrites those same cards anyway.
-  Editing them now would front-run just-in-time module authoring and guarantee a
-  second pass.
+  prerequisites.
+- Rolling the audited pattern across the remaining cards of M0, M1, and the EKS
+  lens is out of scope here and tracked in
+  `docs/specs/ecs-transfer-deck-rollout/SPEC.md`. Decks `03`–`08` (M2–M7) inherit
+  the content rules below as each module is reached.
 
 ### Non-Goals
 
@@ -282,56 +284,9 @@ pattern deck-wide.
 - `docs/specs/ecs-transfer-sections/SPEC.md` — accepted content rules
 - `docs/specs/ecs-transfer-sections/AUDIT.tsv` — seeded card inventory
 
-### Phase 2: Complete the M0 and M1 decks — ⏳ PLANNED
-
-**Objective**: Apply the accepted pattern across both reachable module decks
-without manufacturing weak analogies.
-
-**Tasks**:
-
-- [ ] Audit all 24 cards in `01-foundations.yaml` for accuracy, boundary,
-      consequence, and concision.
-- [ ] Audit all 23 cards in `02-core-workloads.yaml` on the same terms.
-- [ ] Add paired comparisons where the trigger applies, prioritizing rollouts,
-      routing, and workload ownership.
-- [ ] Add sections where ECS experience materially helps and leave neutral
-      cards intentionally blank.
-- [ ] Verify provider- and version-sensitive claims against primary sources and
-      dry-run every new Kubernetes excerpt.
-- [ ] Record each card's disposition, rationale, and any required primary source
-      in `AUDIT.tsv`.
-- [ ] Run deck validation and sync `SPEC.md` and `AUDIT.tsv`.
-
-**Deliverables**:
-
-- `flashcards/decks/01-foundations.yaml` and
-  `flashcards/decks/02-core-workloads.yaml` — improved ECS transfer sections
-- `docs/specs/ecs-transfer-sections/AUDIT.tsv` — terminal dispositions for both
-  decks
-
-### Phase 3: Improve the EKS lens and complete the audit — ⏳ PLANNED
-
-**Objective**: Make the AWS-specific deck distinguish portable Kubernetes from
-EKS-managed behavior and finish with a consistency pass.
-
-**Tasks**:
-
-- [ ] Audit all 16 cards in `11-eks-and-aws.yaml` for the same comparison
-      pattern and current AWS behavior.
-- [ ] Mark every deck-11 row `portable` or `eks-specific` in the `lens` column.
-- [ ] Review all changed sections together for repetition, contradictions, and
-      overlong explanations.
-- [ ] Run the full flashcards checks.
-- [ ] Complete `AUDIT.tsv`, sync `SPEC.md`, and mark only verified work
-      complete.
-
-**Deliverables**:
-
-- `flashcards/decks/11-eks-and-aws.yaml` — improved EKS/Fargate transfer
-  sections
-- `docs/specs/ecs-transfer-sections/AUDIT.tsv` — complete, with the lens column
-  populated for deck 11
-- A validated, internally consistent set of module-level ECS anchors
+The deck-wide rollout — auditing the remaining cards of M0, M1, and the EKS lens
+— is tracked as its own effort in
+[`docs/specs/ecs-transfer-deck-rollout/SPEC.md`](../ecs-transfer-deck-rollout/SPEC.md).
 
 ## Test-Driven Development Requirements
 
@@ -373,9 +328,8 @@ EKS-managed behavior and finish with a consistency pass.
   duplicated tested answer remains.
 - Audit checks: `AUDIT.tsv` has the header
   `card_id<TAB>deck<TAB>disposition<TAB>rationale<TAB>source<TAB>lens` and
-  contains every card ID from decks 01, 02, and 11 exactly once. `pending` is
-  allowed while its phase is open. From the repository root, both commands
-  produce no output when the audit is complete:
+  contains every card ID from decks 01, 02, and 11 exactly once. This inventory
+  check produces no output from the repository root:
 
   ```bash
   # Inventory is complete and duplicate-free.
@@ -384,16 +338,13 @@ EKS-managed behavior and finish with a consistency pass.
       flashcards/decks/{01-foundations,02-core-workloads,11-eks-and-aws}.yaml \
       | sed 's/^  - id: //' | sort) \
     <(tail -n +2 docs/specs/ecs-transfer-sections/AUDIT.tsv | cut -f1 | sort)
-
-  # Every row has a terminal disposition, a rationale, and a deck-11 lens.
-  awk -F'\t' 'NR>1 && ($3 !~ /^(keep|rewrite|add|paired-comparison|not-useful|blocked-factual-defect)$/ \
-    || $4 == "" \
-    || ($2 == "11-eks-and-aws" && $6 !~ /^(portable|eks-specific)$/))' \
-    docs/specs/ecs-transfer-sections/AUDIT.tsv
   ```
 
-  `source` holds a primary-source link whenever the claim is provider-,
-  version-, or tool-sensitive.
+  The terminal-disposition gate (every row `keep`/`rewrite`/`add`/
+  `paired-comparison`/`not-useful`/`blocked-factual-defect`, with a lens on every
+  deck-11 row) belongs to the deck-rollout spec, which drives the `pending` rows
+  to completion. `source` holds a primary-source link whenever the claim is
+  provider-, version-, or tool-sensitive.
 
 ### TDD Exceptions
 
@@ -443,18 +394,18 @@ not enable raw HTML in Markdown to obtain the two-column layout.
 
 - [x] The learner accepts the M0 prose pilot and both M1 paired-configuration
       pilots as materially more useful under the five-question rubric.
-- [ ] Every card in decks 01, 02, and 11 is recorded exactly once in
-      `AUDIT.tsv`, and both audit commands produce no output.
-- [ ] Newly added sections address a concrete transfer benefit or analogy trap;
-      no coverage quota creates filler.
-- [ ] Every paired comparison has schema-complete excerpts, two to four
-      classified field alignments, an operational consequence, and omissions
-      naming only production concerns.
-- [ ] Every Kubernetes excerpt passes `kubectl apply --dry-run=server`.
-- [ ] Paired excerpts render side by side at 1280x800 and ECS-first at 390x844,
-      without horizontal overflow or unsafe Markdown HTML.
-- [ ] Every deck-11 row carries a `portable` or `eks-specific` lens value.
-- [ ] `make lint-decks` and `make check` pass from `flashcards/`.
+- [x] The five pilot cards carry schema-complete, load-validated `ecs:` /
+      `ecs_comparison:` content that renders on every card surface, proven by the
+      parser and web tests (`go test ./internal/deck ./internal/web`).
+- [x] All 63 scoped card IDs are seeded in `AUDIT.tsv`; the inventory diff below
+      produces no output.
+- [x] `make lint-decks` passes from `flashcards/`. `make check` passes except the
+      pre-existing `vuln` target (Go stdlib CVEs fixed in go1.26.6 — a toolchain
+      bump tracked outside this spec).
+
+The deck-wide success criteria — every card audited, both audit commands clean,
+every deck-11 row carrying a lens — belong to
+[`docs/specs/ecs-transfer-deck-rollout/SPEC.md`](../ecs-transfer-deck-rollout/SPEC.md).
 
 ## Troubleshooting Guide
 

@@ -126,10 +126,10 @@ cards:
 
       Each is a superset of the previous.
     ecs: |
-      LoadBalancer on EKS = an NLB (via the AWS Load Balancer Controller), the
-      closest thing to attaching an ECS Service to a target group. On KIND,
-      LoadBalancer Services stay `<pending>` forever — no cloud provider to
-      fulfill them.
+      On EKS a `type: LoadBalancer` Service defaults to a Classic Load Balancer
+      from the in-tree provider; add the AWS Load Balancer Controller and it
+      provisions an NLB — the nearest thing to wiring an ECS service to a target
+      group. On KIND nothing fulfills it, so it sits at `<pending>`.
     tags: [service, networking]
 
   - id: m1-headless-service
@@ -142,6 +142,11 @@ cards:
       Used when the client needs to address specific Pods: StatefulSets,
       databases with their own topology awareness, gRPC clients doing their own
       connection-level balancing.
+    ecs: |
+      ECS service discovery through Cloud Map in `awsvpc` mode publishes an A
+      record per task, so a lookup returns the individual task IPs instead of one
+      virtual address. A headless Service does the same for Pods — the reason
+      self-balancing clients reach for it.
     tags: [service, dns, statefulset]
 
   - id: m1-grpc-l4-gotcha
@@ -291,9 +296,11 @@ cards:
       Deployment can run different code, and `rollout undo` can't get you back.
       Pin tags or digests.
     ecs: |
-      Same hazard as a Task Definition pointing at a mutable tag, but hits
-      harder: ECS pins per task-definition revision, whereas a K8s ReplicaSet
-      keeps pulling on every Pod restart.
+      ECS now resolves a mutable tag to one digest per deployment by default
+      (`versionConsistency`), so every task in a rollout runs identical bits —
+      the divergence this card warns about is handled for you there. Kubernetes
+      leaves it to you: pin a digest, because nothing resolves the tag on your
+      behalf.
     tags: [images, gotcha, production-realism]
 
   - id: m1-daemonset
@@ -364,6 +371,11 @@ cards:
       **Pending** is the interesting one — it means unscheduled (no node fits:
       resources, taints, affinity) or still pulling images. `kubectl describe
       pod` tells you which.
+    ecs: |
+      ECS task states are the nearest hook: PROVISIONING and PENDING both mean
+      "not running yet" without saying why — placement, an ENI, or an image pull.
+      Kubernetes folds that ambiguity into one phase, so `Pending` alone never
+      names the cause.
     tags: [pod, debugging, lifecycle]
 
   - id: m1-crashloopbackoff
@@ -392,6 +404,11 @@ cards:
 
       Note it restarts *containers in place* on the same node — it is not the
       thing that reschedules a Pod elsewhere.
+    ecs: |
+      ECS has no in-place container restart: an essential container dying stops
+      the whole task, and the scheduler launches a replacement, possibly on
+      another instance. The in-place restart here is genuinely new, not a renamed
+      ECS move.
     tags: [pod, lifecycle]
 
   - id: m1-port-forward
@@ -436,4 +453,9 @@ cards:
 
       "It responds" is the `docker run` bar, not the production bar. M3 closes
       these deliberately — but be able to name the gaps *now*.
+    ecs: |
+      ECS bundled much of this into the service and its ALB — health checks,
+      minimum-healthy-percent, Service Auto Scaling. Kubernetes unbundles them
+      into separate objects you add on purpose. The gap list is "what ECS did for
+      you that you now declare yourself."
     tags: [production-realism, m3-preview]

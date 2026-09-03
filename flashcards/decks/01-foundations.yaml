@@ -64,6 +64,11 @@ cards:
         term-kubernetes,
         term-node,
       ]
+    ecs: |
+      Every `aws ecs` call goes through the AWS API, and IAM decides whether it
+      is allowed — you never reach the datastore behind it. kube-apiserver is
+      that single front door here, and RBAC is its IAM. Lock down the API and you
+      have locked down state.
     tags: [control-plane, etcd, security]
 
   - id: m0-kubelet-is-the-thing-that-acts
@@ -331,8 +336,10 @@ cards:
     requires:
       [term-coredns, term-service, term-namespace, term-cluster, term-sidecar]
     ecs: |
-      Closer to **ECS Service Connect** than to Cloud Map: automatic and on by
-      default for every Service, not an opt-in registration per service.
+      ECS service discovery through Cloud Map, or Service Connect, is the nearest
+      hook — but both make you opt in per service and attach a namespace first.
+      Kubernetes gives every Service a cluster DNS name automatically, with
+      nothing to register.
     tags: [dns, networking, service-discovery]
 
   - id: m0-kube-proxy-has-no-health-checks
@@ -462,6 +469,10 @@ cards:
       Excellent for live debugging, useless for postmortems unless you are
       already shipping them somewhere. That gap is real, and M4 closes it.
     requires: [term-event, term-etcd]
+    ecs: |
+      ECS service events are the same trap: a short rolling window in the
+      console, not a durable log. You already forward them to CloudWatch when a
+      postmortem needs them, and Kubernetes Events need the same treatment.
     tags: [events, debugging, observability]
 
   - id: m0-api-groups
@@ -475,6 +486,11 @@ cards:
       Groups version independently — which is exactly what bites you when an
       upgrade removes a beta version your manifest still uses.
     requires: [term-pod, term-deployment, term-manifest, term-api-server]
+    ecs: |
+      The AWS API almost never removes a version from under you; Kubernetes does,
+      on a published schedule. Beta Ingress left `extensions/v1beta1` at 1.22, and
+      manifests still on it stopped applying. Check your manifests for deprecated
+      versions before an upgrade — an ECS habit you never needed.
     tags: [api, versioning, upgrades]
 
   - id: m0-kubectl-explain
