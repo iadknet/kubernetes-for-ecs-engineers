@@ -2,7 +2,7 @@
 
 [![License: MIT](https://img.shields.io/github/license/iadknet/kubernetes-for-ecs-engineers)](LICENSE)
 
-> This was a vibe coded experiment to see if I could build an app to help
+> This is a vibe coded experiment to see if I can build an app to help
 > me translate my experience from ECS/Fargate into Kubernetes.
 >
 > The flashcards have been useful in helping me get more concrete familiarity
