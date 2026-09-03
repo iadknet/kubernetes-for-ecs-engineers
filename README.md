@@ -12,6 +12,24 @@ and zero Kubernetes** to being able to pass the take-home coding challenges
 for the [target roles](docs/target-roles.md) I'm applying to — culminating
 in the Teleport SRE challenge (a Go service that talks to the Kubernetes API).
 
+The study tool is **[the flashcard app](flashcards/)** — a small Go + htmx
+service that is also the workload this program deploys and hardens. Drill
+ECS-anchored cards, or ask its built-in tutor about the card in front of you:
+
+<p align="center">
+  <img src="docs/images/drill.gif" width="720"
+       alt="The flashcard drill in action: M1 core-workloads cards — Pod, Deployment, and Service — each reveal their answer and a 'Coming from ECS' callout (Pod maps to a Task, Deployment/ReplicaSet to Service + Task Definition revisions, Service types to target-group wiring), then grade and advance.">
+  <br>
+  <sub><b>Drill</b> — reveal a card's answer and its "Coming from ECS" callout, then grade it <em>Again / Hard / Good / Easy</em>.</sub>
+</p>
+
+<p align="center">
+  <img src="docs/images/chat.gif" width="720"
+       alt="The card's chat panel: asking 'Can you give me examples of the config in Kubernetes and the same config in ECS and explain how they align?' and Claude answering with an ECS task-definition JSON example, the equivalent ConfigMap YAML, and a table aligning the two — env vars in the task def vs data: keys, new task-def revision vs editing the ConfigMap.">
+  <br>
+  <sub><b>Ask about a card</b> — a built-in tutor (<code>make run-chat</code>) answers in ECS terms, explaining around the card rather than through it.</sub>
+</p>
+
 ## Who this is for
 
 Me: an engineer with extensive AWS ECS/Fargate/container experience learning
@@ -111,11 +129,6 @@ Concepts, vocabulary, and acronyms live in **[flashcards/](flashcards/)** —
 329 cards scheduled with FSRS spaced repetition, every one anchored to its
 ECS/Fargate equivalent or explicitly flagged as having none.
 
-<p align="center">
-  <img src="docs/images/drill.gif" width="720"
-       alt="The flashcard drill in action: M1 core-workloads cards — Pod, Deployment, and Service — each reveal their answer and a 'Coming from ECS' callout (Pod maps to a Task, Deployment/ReplicaSet to Service + Task Definition revisions, Service types to target-group wiring), then grade and advance.">
-</p>
-
 `decks/00-glossary.yaml` is a **glossary tier**: 72 cards, one term apiece,
 defined in isolation. Concept cards declare the terms they depend on with
 `requires:`, and a card is not introduced until those terms are retained — so
@@ -154,12 +167,8 @@ retained yet — it shrinks as the glossary lands.
 logged-in `claude` CLI running locally inside this repo. Ask it to expand on the
 card in front of you and it anchors the answer to the ECS/Fargate equivalent;
 because a drill whose answers are one question away stops being recall practice,
-it explains *around* the card rather than handing you its answer.
-
-<p align="center">
-  <img src="docs/images/chat.gif" width="720"
-       alt="The card's chat panel: asking 'Can you give me examples of the config in Kubernetes and the same config in ECS and explain how they align?' and Claude answering with an ECS task-definition JSON example, the equivalent ConfigMap YAML, and a table aligning the two — env vars in the task def vs data: keys, new task-def revision vs editing the ConfigMap.">
-</p>
+it explains *around* the card rather than handing you its answer (shown at the
+top of this README).
 
 ```bash
 cd flashcards && make run-chat   # http://localhost:8080, with the chat panel
