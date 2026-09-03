@@ -1,6 +1,6 @@
 module github.com/iadk/k8s-flashcards
 
-go 1.26.5
+go 1.26.6
 
 require (
 	github.com/open-spaced-repetition/go-fsrs/v3 v3.3.1
