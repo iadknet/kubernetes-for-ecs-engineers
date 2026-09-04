@@ -9,9 +9,10 @@ The flashcards have been useful in helping me get more concrete familiarity
 with Kubernetes vocabulary and I have found the chatbot extremely useful for
 diving into more detail when I need more context and explanation.
 
-The LLM is pretty terrible at wording the questions and I have been working on
-creating a set of skills to try and guide it toward writing better teaching materials
-(with limited success). There is still no replacement for a good human instructional designer.
+Unfortunately I originally built the cards out with Opus 5, which is notoriously bad
+at writing clear, comprehensible text. I have been working on creating a set of skills to try and guide
+other models in writing better teaching materials (with limited success). 
+There is still no replacement for a good human instructional designer.
 
 The most useful artifact in the project for me has been the skill that guides the LLM
 in grounding any Kubernetes explanation in ECS/Fargate experience.
