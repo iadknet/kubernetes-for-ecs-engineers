@@ -2,28 +2,20 @@
 
 [![License: MIT](https://img.shields.io/github/license/iadknet/kubernetes-for-ecs-engineers)](LICENSE)
 
-> This is a vibe coded experiment to see if I can build an app to help
-> me translate my experience from ECS/Fargate into Kubernetes.
->
-> The flashcards have been useful in helping me get more concrete familiarity
-> with Kubernetes vocabulary and I have found the chatbot extremely useful for
-> diving into more detail when I need more context and explanation.
->
-> The LLM is pretty terrible at wording the questions and I have been working on
-> creating a set of skills to try and guide it toward writing better teaching materials
-> (with limited success). There is still no replacement for a good human instructional designer.
->
-> The most useful artifact in the project for me has been the skill that guides the LLM
-> in grounding any Kubernetes explanation in ECS/Fargate experience.
+This is a mostly vibe coded experiment to see if I can build an app to help
+me translate my experience from ECS/Fargate into Kubernetes.
 
-A guided, hands-on program to take me from **deep AWS ECS/Fargate experience
-and zero Kubernetes** to being able to pass the take-home coding challenges
-for the [target roles](docs/target-roles.md) I'm applying to — culminating
-in the Teleport SRE challenge (a Go service that talks to the Kubernetes API).
+The flashcards have been useful in helping me get more concrete familiarity
+with Kubernetes vocabulary and I have found the chatbot extremely useful for
+diving into more detail when I need more context and explanation.
 
-The study tool is **[the flashcard app](flashcards/)** — a small Go + htmx
-service that is also the workload this program deploys and hardens. Drill
-ECS-anchored cards, or ask its built-in tutor about the card in front of you:
+The LLM is pretty terrible at wording the questions and I have been working on
+creating a set of skills to try and guide it toward writing better teaching materials
+(with limited success). There is still no replacement for a good human instructional designer.
+
+The most useful artifact in the project for me has been the skill that guides the LLM
+in grounding any Kubernetes explanation in ECS/Fargate experience.
+
 
 <p align="center">
   <img src="docs/images/drill.gif" width="720"
